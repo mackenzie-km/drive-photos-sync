@@ -70,17 +70,12 @@ router.post("/sync/abort", requireAuth, (req: Request, res: Response) => {
   });
 });
 
-router.get("/sync/status", requireAuth, (req: Request, res: Response) => {
+router.get("/sync/status", requireAuth, async (req: Request, res: Response) => {
   const userId = (req as any).userId;
   const state = getSyncState(userId);
-  const latestRun = getLatestSyncRun.get(userId);
-  const countsRaw = getFileCounts.all(userId) as {
-    status: string;
-    count: number;
-  }[];
-  const fileCounts = Object.fromEntries(
-    countsRaw.map((r) => [r.status, r.count]),
-  );
+  const latestRun = await getLatestSyncRun(userId);
+  const countsRaw = await getFileCounts(userId);
+  const fileCounts = Object.fromEntries(countsRaw.map((r) => [r.status, r.count]));
   res.json({ ...state, latestRun: latestRun ?? null, fileCounts });
 });
 

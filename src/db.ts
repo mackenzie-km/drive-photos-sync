@@ -1,118 +1,202 @@
-import Database from "better-sqlite3";
-import path from "path";
+import { Pool } from 'pg';
 
-const db = new Database(path.join(process.cwd(), "sync.db"));
+// A Pool manages multiple connections — rather than opening/closing a connection
+// on every query, it keeps a set open and reuses them across requests.
+// DATABASE_URL is the standard Postgres connection string:
+// postgres://user:password@host:5432/dbname
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS tokens (
-    user_id       TEXT PRIMARY KEY,
-    access_token  TEXT,
-    refresh_token TEXT,
-    expiry_date   INTEGER
+// All queries go through here. pg uses $1, $2, $3 placeholders (not ? like SQLite).
+const query = (text: string, params?: any[]) => pool.query(text, params);
+
+// Called once at startup before the server begins accepting requests.
+// CREATE TABLE IF NOT EXISTS is safe to run on every boot.
+export async function initDb() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS tokens (
+      user_id       TEXT PRIMARY KEY,
+      access_token  TEXT,
+      refresh_token TEXT,
+      expiry_date   BIGINT
+    );
+
+    CREATE TABLE IF NOT EXISTS drive_files (
+      id                TEXT NOT NULL,
+      user_id           TEXT NOT NULL,
+      name              TEXT NOT NULL,
+      md5               TEXT,
+      mime_type         TEXT NOT NULL,
+      size              BIGINT,
+      status            TEXT NOT NULL DEFAULT 'uninitialized',
+      photos_media_id   TEXT,
+      error             TEXT,
+      retry_count       INTEGER NOT NULL DEFAULT 0,
+      discovered_at     BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT,
+      last_attempted_at BIGINT,
+      synced_at         BIGINT,
+      PRIMARY KEY (id, user_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_drive_files_status ON drive_files(user_id, status);
+    CREATE INDEX IF NOT EXISTS idx_drive_files_md5    ON drive_files(user_id, md5);
+
+    CREATE TABLE IF NOT EXISTS sync_runs (
+      id           SERIAL PRIMARY KEY,
+      user_id      TEXT NOT NULL,
+      status       TEXT NOT NULL DEFAULT 'running',
+      total        INTEGER DEFAULT 0,
+      uploaded     INTEGER DEFAULT 0,
+      skipped      INTEGER DEFAULT 0,
+      failed       INTEGER DEFAULT 0,
+      started_at   BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT,
+      completed_at BIGINT
+    );
+  `);
+}
+
+export async function saveTokens(
+  userId: string,
+  accessToken: string | null,
+  refreshToken: string | null,
+  expiryDate: number | null,
+) {
+  await query(
+    `INSERT INTO tokens (user_id, access_token, refresh_token, expiry_date)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (user_id) DO UPDATE SET
+       access_token  = $2,
+       refresh_token = COALESCE($3, tokens.refresh_token),
+       expiry_date   = $4`,
+    [userId, accessToken, refreshToken, expiryDate],
   );
+}
 
-  CREATE TABLE IF NOT EXISTS drive_files (
-    id              TEXT NOT NULL,
-    user_id         TEXT NOT NULL,
-    name            TEXT NOT NULL,
-    md5             TEXT,
-    mime_type       TEXT NOT NULL,
-    size            INTEGER,
-    status          TEXT NOT NULL DEFAULT 'uninitialized',
-    photos_media_id TEXT,
-    error           TEXT,
-    retry_count     INTEGER NOT NULL DEFAULT 0,
-    discovered_at   INTEGER NOT NULL DEFAULT (unixepoch()),
-    last_attempted_at INTEGER,
-    synced_at       INTEGER,
-    PRIMARY KEY (id, user_id)
+export async function getTokens(userId: string) {
+  const result = await query(`SELECT * FROM tokens WHERE user_id = $1`, [userId]);
+  return result.rows[0] ?? null;
+}
+
+// If the file (id + user_id) already exists in DB and it's still uninitialized,
+// use the incoming metadata to update the existing row.
+export async function upsertDriveFile(
+  id: string,
+  userId: string,
+  name: string,
+  md5: string | null,
+  mimeType: string,
+  size: number | null,
+) {
+  await query(
+    `INSERT INTO drive_files (id, user_id, name, md5, mime_type, size)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (id, user_id) DO UPDATE SET
+       name      = $3,
+       md5       = $4,
+       mime_type = $5,
+       size      = $6
+     WHERE drive_files.status = 'uninitialized'`,
+    [id, userId, name, md5, mimeType, size],
   );
+}
 
-  CREATE INDEX IF NOT EXISTS idx_drive_files_status ON drive_files(user_id, status);
-  CREATE INDEX IF NOT EXISTS idx_drive_files_md5    ON drive_files(user_id, md5);
-
-  CREATE TABLE IF NOT EXISTS sync_runs (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id      TEXT NOT NULL,
-    status       TEXT NOT NULL DEFAULT 'running',
-    total        INTEGER DEFAULT 0,
-    uploaded     INTEGER DEFAULT 0,
-    skipped      INTEGER DEFAULT 0,
-    failed       INTEGER DEFAULT 0,
-    started_at   INTEGER NOT NULL DEFAULT (unixepoch()),
-    completed_at INTEGER
+// Returns the row if a file with the same md5 is already uploaded for this user, null otherwise
+export async function getMd5Uploaded(userId: string, md5: string) {
+  const result = await query(
+    `SELECT id FROM drive_files WHERE user_id = $1 AND md5 = $2 AND status = 'uploaded' LIMIT 1`,
+    [userId, md5],
   );
-`);
-
-export const saveTokens = db.prepare(
-  `INSERT OR REPLACE INTO tokens (user_id, access_token, refresh_token, expiry_date)
-   VALUES (?, ?, ?, ?)`,
-);
-
-export const getTokens = db.prepare(`SELECT * FROM tokens WHERE user_id = ?`);
-
-// If the file (id + user_id) already exists in DB and it's still unInitialized
-// Use the incoming metadata to update the existing line item
-export const upsertDriveFile = db.prepare(
-  `INSERT INTO drive_files (id, user_id, name, md5, mime_type, size)
-   VALUES (?, ?, ?, ?, ?, ?)
-   ON CONFLICT(id, user_id) DO UPDATE SET
-     name      = excluded.name,
-     md5       = excluded.md5,
-     mime_type = excluded.mime_type,
-     size      = excluded.size
-   WHERE status = 'uninitialized'`,
-);
-
-// Returns truthy if a *different* file with the same md5 is already uploaded for this user
-export const getMd5Uploaded = db.prepare(
-  `SELECT id FROM drive_files WHERE user_id = ? AND md5 = ? AND status = 'uploaded' LIMIT 1`,
-);
+  return result.rows[0] ?? null;
+}
 
 // Mark a file as in_progress before touching the network — so a crash mid-upload
 // leaves a clear signal rather than a file stuck in 'uninitialized' forever.
-export const markFileInProgress = db.prepare(
-  `UPDATE drive_files
-   SET status = 'in_progress', last_attempted_at = unixepoch()
-   WHERE id = ? AND user_id = ?`,
-);
+export async function markFileInProgress(id: string, userId: string) {
+  await query(
+    `UPDATE drive_files
+     SET status = 'in_progress', last_attempted_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+     WHERE id = $1 AND user_id = $2`,
+    [id, userId],
+  );
+}
 
 // retryCountIncrement: pass 1 for failures, 0 for success/skipped
-export const updateFileStatus = db.prepare(
-  `UPDATE drive_files
-   SET status = ?, photos_media_id = ?, error = ?,
-       retry_count = retry_count + ?, synced_at = unixepoch()
-   WHERE id = ? AND user_id = ?`,
-);
+export async function updateFileStatus(
+  status: string,
+  photosMediaId: string | null,
+  error: string | null,
+  retryCountIncrement: number,
+  id: string,
+  userId: string,
+) {
+  await query(
+    `UPDATE drive_files
+     SET status = $1, photos_media_id = $2, error = $3,
+         retry_count = retry_count + $4,
+         synced_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+     WHERE id = $5 AND user_id = $6`,
+    [status, photosMediaId, error, retryCountIncrement, id, userId],
+  );
+}
 
 // On startup, reset any files stuck in_progress from a previous crash back to uninitialized
-export const resetStuckFiles = db.prepare(
-  `UPDATE drive_files SET status = 'uninitialized' WHERE user_id = ? AND status = 'in_progress'`,
-);
+export async function resetStuckFiles(userId: string) {
+  await query(
+    `UPDATE drive_files SET status = 'uninitialized'
+     WHERE user_id = $1 AND status = 'in_progress'`,
+    [userId],
+  );
+}
 
 // Pick up both fresh uninitialized files and failed files that haven't exceeded the retry limit
-export const getUninitializedFiles = db.prepare(
-  `SELECT * FROM drive_files
-   WHERE user_id = ? AND (status = 'uninitialized' OR (status = 'failed' AND retry_count < 3))
-   LIMIT 50`,
-);
+export async function getUninitializedFiles(userId: string) {
+  const result = await query(
+    `SELECT * FROM drive_files
+     WHERE user_id = $1 AND (status = 'uninitialized' OR (status = 'failed' AND retry_count < 3))
+     LIMIT 50`,
+    [userId],
+  );
+  return result.rows;
+}
 
-export const getFileCounts = db.prepare(
-  `SELECT status, COUNT(*) as count FROM drive_files WHERE user_id = ? GROUP BY status`,
-);
+export async function getFileCounts(userId: string) {
+  const result = await query(
+    `SELECT status, COUNT(*) as count FROM drive_files WHERE user_id = $1 GROUP BY status`,
+    [userId],
+  );
+  return result.rows as { status: string; count: number }[];
+}
 
-export const createSyncRun = db.prepare(
-  `INSERT INTO sync_runs (user_id) VALUES (?)`,
-);
+// RETURNING id is how pg gives you back the auto-generated SERIAL id after an insert
+export async function createSyncRun(userId: string): Promise<number> {
+  const result = await query(
+    `INSERT INTO sync_runs (user_id) VALUES ($1) RETURNING id`,
+    [userId],
+  );
+  return result.rows[0].id;
+}
 
-export const updateSyncRun = db.prepare(
-  `UPDATE sync_runs
-   SET status = ?, total = ?, uploaded = ?, skipped = ?, failed = ?, completed_at = ?
-   WHERE id = ? AND user_id = ?`,
-);
+export async function updateSyncRun(
+  status: string,
+  total: number,
+  uploaded: number,
+  skipped: number,
+  failed: number,
+  completedAt: number,
+  id: number,
+  userId: string,
+) {
+  await query(
+    `UPDATE sync_runs
+     SET status = $1, total = $2, uploaded = $3, skipped = $4, failed = $5, completed_at = $6
+     WHERE id = $7 AND user_id = $8`,
+    [status, total, uploaded, skipped, failed, completedAt, id, userId],
+  );
+}
 
-export const getLatestSyncRun = db.prepare(
-  `SELECT * FROM sync_runs WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
-);
-
-export default db;
+export async function getLatestSyncRun(userId: string) {
+  const result = await query(
+    `SELECT * FROM sync_runs WHERE user_id = $1 ORDER BY id DESC LIMIT 1`,
+    [userId],
+  );
+  return result.rows[0] ?? null;
+}

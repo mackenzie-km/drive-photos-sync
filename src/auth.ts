@@ -40,7 +40,7 @@ export async function handleCallback(code: string): Promise<string> {
   const { data } = await oauth2.userinfo.get();
   const userId = data.id!;
 
-  saveTokens.run(
+  await saveTokens(
     userId,
     tokens.access_token ?? null,
     tokens.refresh_token ?? null,
@@ -51,7 +51,7 @@ export async function handleCallback(code: string): Promise<string> {
 }
 
 export async function getAuthClient(userId: string): Promise<OAuth2Client> {
-  const row = getTokens.get(userId) as any;
+  const row = await getTokens(userId);
   if (!row?.refresh_token) {
     throw new Error('Not authenticated. Call GET /auth/url and complete the OAuth flow first.');
   }
@@ -63,14 +63,15 @@ export async function getAuthClient(userId: string): Promise<OAuth2Client> {
     expiry_date: row.expiry_date,
   });
 
-  // Persist any refreshed tokens automatically
+  // Persist any refreshed tokens automatically.
+  // The event handler can't be async, so we fire-and-forget with error logging.
   client.on('tokens', (tokens) => {
-    saveTokens.run(
+    saveTokens(
       userId,
       tokens.access_token ?? row.access_token,
       tokens.refresh_token ?? row.refresh_token,
       tokens.expiry_date ?? null
-    );
+    ).catch(err => console.error('[auth] failed to persist refreshed tokens:', err));
   });
 
   return client;
