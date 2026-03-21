@@ -2,6 +2,8 @@
   "name": "drive-photos-sync",
   "version": "0.1.0",
   "scripts": {
+    "db:start": "pg_ctl -D /opt/homebrew/var/postgresql@16 -l /tmp/postgres.log start",
+    "db:stop": "pg_ctl -D /opt/homebrew/var/postgresql@16 stop",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js"
