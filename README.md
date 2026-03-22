@@ -3,14 +3,14 @@
 Why search through drive, hunting around for your old photos? This web app
 
 - Uses AI to add labels to your Drive Photos to improve searching
-- Then syncs photos from Google Drive to Google Photos
+- Then syncs photos from Google Drive to Google Photos, skipping duplicates
 
 ## Tech stack
 
 - **Backend:** Node.js, TypeScript, Express
 - **Database:** PostgreSQL
 - **Auth:** Google OAuth 2.0
-- **Deployment:** Render (backend) · Vercel (frontend, coming soon)
+- **Deployment:** Render (backend) · Vercel (frontend)
 
 ## How it works
 

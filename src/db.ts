@@ -1,13 +1,10 @@
-import { Pool } from 'pg';
+import { Pool } from "pg";
 
 // A Pool manages multiple connections — rather than opening/closing a connection
 // on every query, it keeps a set open and reuses them across requests.
-// DATABASE_URL is the standard Postgres connection string:
-// postgres://user:password@host:5432/dbname
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-// All queries go through here. pg uses $1, $2, $3 placeholders (not ? like SQLite).
-const query = (text: string, params?: any[]) => pool.query(text, params);
+export const query = (text: string, params?: any[]) => pool.query(text, params);
 
 // Called once at startup before the server begins accepting requests.
 // CREATE TABLE IF NOT EXISTS is safe to run on every boot.
@@ -72,7 +69,9 @@ export async function saveTokens(
 }
 
 export async function getTokens(userId: string) {
-  const result = await query(`SELECT * FROM tokens WHERE user_id = $1`, [userId]);
+  const result = await query(`SELECT * FROM tokens WHERE user_id = $1`, [
+    userId,
+  ]);
   return result.rows[0] ?? null;
 }
 
@@ -150,8 +149,11 @@ export async function resetStuckFiles(userId: string) {
 // Pick up both fresh uninitialized files and failed files that haven't exceeded the retry limit
 export async function getUninitializedFiles(userId: string) {
   const result = await query(
+    // `SELECT * FROM drive_files
+    //  WHERE user_id = $1 AND (status = 'uninitialized' OR (status = 'failed' AND retry_count < 3))
+    //  LIMIT 50`,
     `SELECT * FROM drive_files
-     WHERE user_id = $1 AND (status = 'uninitialized' OR (status = 'failed' AND retry_count < 3))
+     WHERE user_id = $1
      LIMIT 50`,
     [userId],
   );
