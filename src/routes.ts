@@ -22,12 +22,17 @@ router.get("/auth/callback", async (req: Request, res: Response) => {
   }
   try {
     const userId = await handleCallback(code);
+    console.log(userId);
     (req.session as any).userId = userId;
     res.send(
       "<p>Authentication successful. You can close this tab and return to the terminal.</p>",
     );
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error('[auth] callback error:', err);
+    // Send the user back to try again with a human-readable message in the page
+    res.status(403).send(
+      `<p>${err.message}</p><p><a href="/auth/url">Try again</a></p>`
+    );
   }
 });
 
@@ -55,12 +60,12 @@ function requireAuth(req: Request, res: Response, next: Function) {
 
 // ── Sync ──────────────────────────────────────────────────────────────────────
 router.post("/sync/start", requireAuth, async (req: Request, res: Response) => {
-  try {
-    const runId = await startSync((req as any).userId);
-    res.json({ runId, message: "Sync started" });
-  } catch (err: any) {
-    res.status(400).json({ error: err.message });
-  }
+  // try {
+  //   const runId = await startSync((req as any).userId);
+  //   res.json({ runId, message: "Sync started" });
+  // } catch (err: any) {
+  //   res.status(400).json({ error: err.message });
+  // }
 });
 
 router.post("/sync/abort", requireAuth, (req: Request, res: Response) => {
@@ -75,7 +80,9 @@ router.get("/sync/status", requireAuth, async (req: Request, res: Response) => {
   const state = getSyncState(userId);
   const latestRun = await getLatestSyncRun(userId);
   const countsRaw = await getFileCounts(userId);
-  const fileCounts = Object.fromEntries(countsRaw.map((r) => [r.status, r.count]));
+  const fileCounts = Object.fromEntries(
+    countsRaw.map((r) => [r.status, r.count]),
+  );
   res.json({ ...state, latestRun: latestRun ?? null, fileCounts });
 });
 
