@@ -4,7 +4,7 @@ import { saveTokens, getTokens } from "./db";
 
 const SCOPES = [
   "https://www.googleapis.com/auth/drive.readonly",
-  "https://www.googleapis.com/auth/photoslibrary",
+  "https://www.googleapis.com/auth/photoslibrary.appendonly",
   "https://www.googleapis.com/auth/userinfo.profile",
 ];
 

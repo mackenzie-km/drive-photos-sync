@@ -149,11 +149,8 @@ export async function resetStuckFiles(userId: string) {
 // Pick up both fresh uninitialized files and failed files that haven't exceeded the retry limit
 export async function getUninitializedFiles(userId: string) {
   const result = await query(
-    // `SELECT * FROM drive_files
-    //  WHERE user_id = $1 AND (status = 'uninitialized' OR (status = 'failed' AND retry_count < 3))
-    //  LIMIT 50`,
     `SELECT * FROM drive_files
-     WHERE user_id = $1
+     WHERE user_id = $1 AND (status = 'uninitialized' OR (status = 'failed' AND retry_count < 3))
      LIMIT 50`,
     [userId],
   );

@@ -2,8 +2,11 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import session from "express-session";
+import connectPg from "connect-pg-simple";
 import routes from "./routes";
 import { initDb } from "./db";
+
+const PgStore = connectPg(session);
 
 const app = express();
 app.use(
@@ -16,6 +19,10 @@ app.use(express.json());
 
 app.use(
   session({
+    store: new PgStore({
+      conString: process.env.DATABASE_URL,
+      createTableIfMissing: true, // auto-creates a "session" table in Postgres
+    }),
     secret: process.env.SESSION_SECRET ?? "dev-secret-change-in-production",
     resave: false,
     saveUninitialized: false,

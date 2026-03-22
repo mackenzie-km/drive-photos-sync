@@ -37,7 +37,8 @@ export async function* listDrivePhotos(
     const res = await drive.files.list({
       q: `(${MIME_QUERY}) and trashed = false`,
       fields: "nextPageToken, files(id, name, md5Checksum, mimeType, size)",
-      pageSize: 1000,
+      // TODO: pageSize: 1000,
+      pageSize: 1,
       pageToken,
     });
 

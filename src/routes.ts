@@ -28,11 +28,11 @@ router.get("/auth/callback", async (req: Request, res: Response) => {
       "<p>Authentication successful. You can close this tab and return to the terminal.</p>",
     );
   } catch (err: any) {
-    console.error('[auth] callback error:', err);
+    console.error("[auth] callback error:", err);
     // Send the user back to try again with a human-readable message in the page
-    res.status(403).send(
-      `<p>${err.message}</p><p><a href="/auth/url">Try again</a></p>`
-    );
+    res
+      .status(403)
+      .send(`<p>${err.message}</p><p><a href="/auth/url">Try again</a></p>`);
   }
 });
 
@@ -60,12 +60,12 @@ function requireAuth(req: Request, res: Response, next: Function) {
 
 // ── Sync ──────────────────────────────────────────────────────────────────────
 router.post("/sync/start", requireAuth, async (req: Request, res: Response) => {
-  // try {
-  //   const runId = await startSync((req as any).userId);
-  //   res.json({ runId, message: "Sync started" });
-  // } catch (err: any) {
-  //   res.status(400).json({ error: err.message });
-  // }
+  try {
+    const runId = await startSync((req as any).userId);
+    res.json({ runId, message: "Sync started" });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 router.post("/sync/abort", requireAuth, (req: Request, res: Response) => {

@@ -44,6 +44,11 @@ createdb drive_photos_sync
 3. Create an OAuth 2.0 Client ID under **Credentials**
 4. Add `http://localhost:3000/auth/callback` as an authorized redirect URI
 5. Copy your Client ID and Client Secret
+6. Make sure Google Drive & Google Photos are set up as enabled APIs for this project.
+7. Add Drive & Photos to your OAuth Scopes:
+
+- https://www.googleapis.com/auth/drive.readonly
+- https://www.googleapis.com/auth/photoslibrary.appendonly
 
 ### Environment
 

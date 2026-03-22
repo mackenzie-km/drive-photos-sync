@@ -10,6 +10,7 @@ import {
   resetStuckFiles,
   createSyncRun,
   updateSyncRun,
+  getFileCounts,
 } from "./db";
 
 type SyncStatus =
@@ -55,7 +56,8 @@ export async function startSync(userId: string): Promise<number> {
 
   // Fire and forget — progress is tracked in the DB and queryable via /sync/status
   runSync(userId, runId).catch((err) => {
-    console.error("[sync] fatal error:", err);
+    console.error("[sync] fatal error:", err.message);
+    // TODO: add logging here
     finishRun(userId, runId, "failed", 0, 0, 0, 0);
   });
 
@@ -76,13 +78,24 @@ async function runSync(userId: string, runId: number) {
 
   for await (const file of listDrivePhotos(auth)) {
     if (state.shouldAbort) break;
-    await upsertDriveFile(file.id, userId, file.name, file.md5, file.mime_type, file.size);
+    await upsertDriveFile(
+      file.id,
+      userId,
+      file.name,
+      file.md5,
+      file.mime_type,
+      file.size,
+    );
     discovered++;
+    // TODO: remove
+    break;
     if (discovered % 500 === 0)
       console.log(`[sync:${userId}]   ${discovered} files found so far...`);
   }
 
-  console.log(`[sync:${userId}] Discovery complete: ${discovered} photos in Drive.`);
+  console.log(
+    `[sync:${userId}] Discovery complete: ${discovered} photos in Drive.`,
+  );
 
   if (state.shouldAbort) {
     return finishRun(userId, runId, "aborted", discovered, 0, 0, 0);
@@ -90,8 +103,14 @@ async function runSync(userId: string, runId: number) {
 
   // ── Phase 2: upload ────────────────────────────────────────────────────────
   state.status = "uploading";
-  console.log(`[sync:${userId}] Phase 2: uploading to Google Photos...`);
-  let uploaded = 0, skipped = 0, failed = 0;
+  const counts = await getFileCounts(userId);
+  const byStatus = Object.fromEntries(counts.map((r) => [r.status, Number(r.count)]));
+  const pending = (byStatus.uninitialized ?? 0) + (byStatus.failed ?? 0);
+  const alreadyDone = byStatus.uploaded ?? 0;
+  console.log(`[sync:${userId}] Phase 2: ${pending} pending, ${alreadyDone} already uploaded.`);
+  let uploaded = 0,
+    skipped = 0,
+    failed = 0;
 
   while (!state.shouldAbort) {
     const batch = await getUninitializedFiles(userId);
@@ -100,17 +119,30 @@ async function runSync(userId: string, runId: number) {
     for (const file of batch) {
       if (state.shouldAbort) break;
 
+      // TODO: Test
       try {
         // Dedup: if another file with the same md5 was already uploaded, skip
-        if (file.md5 && await getMd5Uploaded(userId, file.md5)) {
-          await updateFileStatus("skipped", null, "duplicate md5", 0, file.id, userId);
-          skipped++;
-          continue;
-        }
+        // if (file.md5 && (await getMd5Uploaded(userId, file.md5))) {
+        //   await updateFileStatus(
+        //     "skipped",
+        //     null,
+        //     "duplicate md5",
+        //     0,
+        //     file.id,
+        //     userId,
+        //   );
+        //   skipped++;
+        //   continue;
+        // }
 
         await markFileInProgress(file.id, userId);
         const stream = await streamDriveFile(auth, file.id);
-        const mediaId = await uploadPhoto(auth, stream, file.name, file.mime_type);
+        const mediaId = await uploadPhoto(
+          auth,
+          stream,
+          file.name,
+          file.mime_type,
+        );
         await updateFileStatus("uploaded", mediaId, null, 0, file.id, userId);
         uploaded++;
         console.log(`[sync:${userId}]   ✓ ${file.name} (${uploaded} uploaded)`);
@@ -118,15 +150,33 @@ async function runSync(userId: string, runId: number) {
         // Polite delay to stay within Google's rate limits
         await sleep(250);
       } catch (err: any) {
-        await updateFileStatus("failed", null, err.message ?? "unknown error", 1, file.id, userId);
+        console.log("hit error", JSON.stringify(err));
+        await updateFileStatus(
+          "failed",
+          null,
+          err.message ?? "unknown error",
+          1,
+          file.id,
+          userId,
+        );
         failed++;
         console.error(`[sync:${userId}]   ✗ ${file.name}: ${err.message}`);
       }
     }
   }
 
-  finishRun(userId, runId, state.shouldAbort ? "aborted" : "done", discovered, uploaded, skipped, failed);
-  console.log(`[sync:${userId}] Finished. uploaded=${uploaded} skipped=${skipped} failed=${failed}`);
+  finishRun(
+    userId,
+    runId,
+    state.shouldAbort ? "aborted" : "done",
+    discovered,
+    uploaded,
+    skipped,
+    failed,
+  );
+  console.log(
+    `[sync:${userId}] Finished. uploaded=${uploaded} skipped=${skipped} failed=${failed}`,
+  );
 }
 
 function finishRun(
@@ -140,8 +190,16 @@ function finishRun(
 ) {
   const state = userSyncState.get(userId);
   if (state) state.status = status;
-  updateSyncRun(status, total, uploaded, skipped, failed, Math.floor(Date.now() / 1000), runId, userId)
-    .catch((err) => console.error("[sync] failed to update sync run:", err));
+  updateSyncRun(
+    status,
+    total,
+    uploaded,
+    skipped,
+    failed,
+    Math.floor(Date.now() / 1000),
+    runId,
+    userId,
+  ).catch((err) => console.error("[sync] failed to update sync run:", err));
 }
 
 function sleep(ms: number) {
