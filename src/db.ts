@@ -24,6 +24,7 @@ export async function initDb() {
       md5               TEXT,
       mime_type         TEXT NOT NULL,
       size              BIGINT,
+      thumbnail_link    TEXT,
       status            TEXT NOT NULL DEFAULT 'uninitialized',
       photos_media_id   TEXT,
       error             TEXT,
@@ -84,17 +85,19 @@ export async function upsertDriveFile(
   md5: string | null,
   mimeType: string,
   size: number | null,
+  thumbnailLink: string | null,
 ) {
   await query(
-    `INSERT INTO drive_files (id, user_id, name, md5, mime_type, size)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO drive_files (id, user_id, name, md5, mime_type, size, thumbnail_link)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (id, user_id) DO UPDATE SET
-       name      = $3,
-       md5       = $4,
-       mime_type = $5,
-       size      = $6
+       name           = $3,
+       md5            = $4,
+       mime_type      = $5,
+       size           = $6,
+       thumbnail_link = $7
      WHERE drive_files.status = 'uninitialized'`,
-    [id, userId, name, md5, mimeType, size],
+    [id, userId, name, md5, mimeType, size, thumbnailLink],
   );
 }
 

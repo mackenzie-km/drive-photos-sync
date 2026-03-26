@@ -1,10 +1,10 @@
 import { getAuthClient } from "./auth";
 import { listDrivePhotos, streamDriveFile } from "./drive";
+import { generatePhotoDescription } from "./gemini";
 import { uploadPhoto } from "./photos";
 import {
   upsertDriveFile,
   getUninitializedFiles,
-  getMd5Uploaded,
   markFileInProgress,
   updateFileStatus,
   resetStuckFiles,
@@ -85,6 +85,7 @@ async function runSync(userId: string, runId: number) {
       file.md5,
       file.mime_type,
       file.size,
+      file.thumbnailLink,
     );
     discovered++;
     // TODO: remove
@@ -104,20 +105,34 @@ async function runSync(userId: string, runId: number) {
   // ── Phase 2: upload ────────────────────────────────────────────────────────
   state.status = "uploading";
   const counts = await getFileCounts(userId);
-  const byStatus = Object.fromEntries(counts.map((r) => [r.status, Number(r.count)]));
+  const byStatus = Object.fromEntries(
+    counts.map((r) => [r.status, Number(r.count)]),
+  );
+  const MAX_UPLOADS_PER_USER = 1000;
   const pending = (byStatus.uninitialized ?? 0) + (byStatus.failed ?? 0);
   const alreadyDone = byStatus.uploaded ?? 0;
-  console.log(`[sync:${userId}] Phase 2: ${pending} pending, ${alreadyDone} already uploaded.`);
+  const remaining = MAX_UPLOADS_PER_USER - alreadyDone;
+  console.log(`[sync:${userId}] Phase 2: Preparing to upload photos.`);
+  if (remaining <= 0) {
+    console.log(
+      `[sync:${userId}] Upload limit of ${MAX_UPLOADS_PER_USER} reached.`,
+    );
+    return finishRun(userId, runId, "done", discovered, 0, 0, 0);
+  }
   let uploaded = 0,
     skipped = 0,
     failed = 0;
 
   while (!state.shouldAbort) {
     const batch = await getUninitializedFiles(userId);
-    if (batch.length === 0) break;
+    if (batch.length === 0) {
+      console.log(`[sync:${userId}] 0 uninitialized files remaining.`);
+      break;
+    }
 
     for (const file of batch) {
       if (state.shouldAbort) break;
+      if (uploaded >= remaining) break;
 
       // TODO: Test
       try {
@@ -136,12 +151,16 @@ async function runSync(userId: string, runId: number) {
         // }
 
         await markFileInProgress(file.id, userId);
+        const description = file.thumbnail_link
+          ? await generatePhotoDescription(file.thumbnail_link)
+          : undefined;
         const stream = await streamDriveFile(auth, file.id);
         const mediaId = await uploadPhoto(
           auth,
           stream,
           file.name,
           file.mime_type,
+          description,
         );
         await updateFileStatus("uploaded", mediaId, null, 0, file.id, userId);
         uploaded++;

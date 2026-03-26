@@ -26,6 +26,7 @@ export async function uploadPhoto(
   stream: NodeJS.ReadableStream,
   filename: string,
   mimeType: string,
+  description?: string,
 ): Promise<string> {
   if (!SUPPORTED_MIME_TYPES.has(mimeType)) {
     throw new Error(`Unsupported mime type: ${mimeType}`);
@@ -53,6 +54,7 @@ export async function uploadPhoto(
     {
       newMediaItems: [
         {
+          ...(description && { description }),
           simpleMediaItem: { uploadToken, fileName: filename },
         },
       ],

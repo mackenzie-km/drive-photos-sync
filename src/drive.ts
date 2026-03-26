@@ -24,6 +24,7 @@ export interface DrivePhoto {
   md5: string | null;
   mime_type: string;
   size: number | null;
+  thumbnailLink: string | null;
 }
 
 // Async generator — yields one file at a time, handles pagination internally.
@@ -36,7 +37,7 @@ export async function* listDrivePhotos(
   do {
     const res = await drive.files.list({
       q: `(${MIME_QUERY}) and trashed = false`,
-      fields: "nextPageToken, files(id, name, md5Checksum, mimeType, size)",
+      fields: "nextPageToken, files(id, name, md5Checksum, mimeType, size, thumbnailLink)",
       // TODO: pageSize: 1000,
       pageSize: 1,
       pageToken,
@@ -49,6 +50,7 @@ export async function* listDrivePhotos(
         md5: file.md5Checksum ?? null,
         mime_type: file.mimeType!,
         size: file.size ? parseInt(file.size) : null,
+        thumbnailLink: file.thumbnailLink ?? null,
       };
     }
 
