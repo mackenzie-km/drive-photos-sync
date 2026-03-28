@@ -46,6 +46,7 @@ p {
 .tagline {
   font-size: 1.05rem;
   margin: 16px 0;
+  color: #141414;
 }
 
 button {
@@ -192,6 +193,59 @@ button:hover {
 .stat-blue  { background: #f4d6b0; color: #c97d35; }
 .stat-red   { background: #fce8e6; color: #c0392b; }
 .stat-gray  { background: #f0ebe6; color: oklch(43.9% 0 0); }
+
+.chevron {
+  display: inline-block;
+  transform: rotate(90deg);
+  transition: transform 0.2s cubic-bezier(.4,0,.2,1);
+  font-style: normal;
+  font-size: 2rem;
+  line-height: 1;
+  vertical-align: middle;
+  margin-left: 8px;
+}
+
+.chevron-up {
+  transform: rotate(-90deg);
+}
+
+.btn-files {
+  margin-top: 20px;
+  width: 100%;
+}
+
+.file-list {
+  list-style: none;
+  margin-top: 16px;
+  border-top: 1px solid #e5e5e5;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.file-list-empty {
+  padding: 16px 0;
+  color: oklch(55.6% 0 0);
+  font-size: 1.05rem;
+}
+
+.file-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid #f0ebe6;
+  font-size: 1.05rem;
+}
+
+.file-name {
+  color: #141414;
+  font-weight: 500;
+}
+
+.file-meta {
+  color: oklch(55.6% 0 0);
+  font-size: 0.85rem;
+}
 
 .footer {
   background: #ddd4c9;

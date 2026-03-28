@@ -195,6 +195,16 @@ export async function updateSyncRun(
   );
 }
 
+export async function getUploadedFiles(userId: string) {
+  const result = await query(
+    `SELECT id, name, mime_type, size, synced_at FROM drive_files
+     WHERE user_id = $1 AND status = 'uploaded'
+     ORDER BY synced_at DESC`,
+    [userId],
+  );
+  return result.rows;
+}
+
 export async function getLatestSyncRun(userId: string) {
   const result = await query(
     `SELECT * FROM sync_runs WHERE user_id = $1 ORDER BY id DESC LIMIT 1`,

@@ -24,7 +24,7 @@ type SyncStatus =
 // Per-user sync state — keyed by userId so concurrent users don't interfere
 const userSyncState = new Map<
   string,
-  { runId: number; status: SyncStatus; shouldAbort: boolean }
+  { runId: number; status: SyncStatus; shouldAbort: boolean; currentFile: string | null }
 >();
 
 export function getSyncState(userId: string) {
@@ -32,6 +32,7 @@ export function getSyncState(userId: string) {
   return {
     runId: state?.runId ?? null,
     status: state?.status ?? "idle",
+    currentFile: state?.currentFile ?? null,
   };
 }
 
@@ -52,6 +53,7 @@ export async function startSync(userId: string): Promise<number> {
     runId,
     status: "discovering",
     shouldAbort: false,
+    currentFile: null,
   });
 
   // Fire and forget — progress is tracked in the DB and queryable via /sync/status
@@ -150,6 +152,7 @@ async function runSync(userId: string, runId: number) {
         //   continue;
         // }
 
+        state.currentFile = file.name;
         await markFileInProgress(file.id, userId);
         const description = file.thumbnail_link
           ? await generatePhotoDescription(file.thumbnail_link)
@@ -184,6 +187,7 @@ async function runSync(userId: string, runId: number) {
     }
   }
 
+  state.currentFile = null;
   finishRun(
     userId,
     runId,

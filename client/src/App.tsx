@@ -34,9 +34,19 @@ const STATUS_LABEL: Record<string, string> = {
 const IS_RUNNING = (status: string) =>
   status === "discovering" || status === "uploading";
 
+interface UploadedFile {
+  id: string;
+  name: string;
+  mime_type: string;
+  size: number;
+  synced_at: number;
+}
+
 export default function App() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
+  const [showFiles, setShowFiles] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
 
   useEffect(() => {
     fetch("/auth/me")
@@ -56,6 +66,17 @@ export default function App() {
     const interval = setInterval(poll, 2000);
     return () => clearInterval(interval);
   }, [loggedIn]);
+
+  async function handleToggleFiles() {
+    if (showFiles) {
+      setShowFiles(false);
+      return;
+    }
+    const res = await fetch("/sync/files");
+    const { files } = await res.json();
+    setUploadedFiles(files);
+    setShowFiles(true);
+  }
 
   async function handleLogin() {
     const res = await fetch("/auth/url");
@@ -140,6 +161,24 @@ export default function App() {
             <Stat label="Failed" value={counts.failed ?? 0} color="red" />
             <Stat label="Skipped" value={counts.skipped ?? 0} color="gray" />
           </div>
+
+          <button className="btn-secondary btn-files" onClick={handleToggleFiles}>
+            Show uploaded files <span className={`chevron ${showFiles ? "chevron-up" : ""}`}>›</span>
+          </button>
+
+          {showFiles && (
+            <ul className="file-list">
+              {uploadedFiles.length === 0 && (
+                <li className="file-list-empty">No files uploaded yet.</li>
+              )}
+              {uploadedFiles.map((f) => (
+                <li key={f.id} className="file-list-item">
+                  <span className="file-name">{f.name}</span>
+                  <span className="file-meta">{(f.size / 1024 / 1024).toFixed(1)} MB</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
       <footer className="footer">

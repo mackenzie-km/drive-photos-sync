@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { getAuthUrl, handleCallback } from "./auth";
 import { startSync, getSyncState, requestAbort } from "./sync";
-import { getLatestSyncRun, getFileCounts } from "./db";
+import { getLatestSyncRun, getFileCounts, getUploadedFiles } from "./db";
 
 const router = Router();
 
@@ -84,6 +84,11 @@ router.get("/sync/status", requireAuth, async (req: Request, res: Response) => {
     countsRaw.map((r) => [r.status, r.count]),
   );
   res.json({ ...state, latestRun: latestRun ?? null, fileCounts });
+});
+
+router.get("/sync/files", requireAuth, async (req: Request, res: Response) => {
+  const files = await getUploadedFiles((req as any).userId);
+  res.json({ files });
 });
 
 export default router;
