@@ -47,6 +47,7 @@ export default function App() {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
   const [showFiles, setShowFiles] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/auth/me")
@@ -60,7 +61,11 @@ export default function App() {
       fetch("/sync/status")
         .then((r) => r.json())
         .then(setSyncStatus)
-        .catch(console.error);
+        .catch(() =>
+          setError(
+            "Unable to reach the server. Please try refreshing the page.",
+          ),
+        );
     };
     poll();
     const interval = setInterval(poll, 2000);
@@ -72,24 +77,51 @@ export default function App() {
       setShowFiles(false);
       return;
     }
-    const res = await fetch("/sync/files");
-    const { files } = await res.json();
-    setUploadedFiles(files);
-    setShowFiles(true);
+    try {
+      const res = await fetch("/sync/files");
+      if (!res.ok) throw new Error("Failed to load uploaded files.");
+      const { files } = await res.json();
+      setUploadedFiles(files);
+      setShowFiles(true);
+    } catch {
+      setError("Could not load uploaded files. Please try again.");
+    }
   }
 
   async function handleLogin() {
-    const res = await fetch("/auth/url");
-    const { url } = await res.json();
-    window.location.href = url;
+    try {
+      const res = await fetch("/auth/url");
+      const { url } = await res.json();
+      window.location.href = url;
+    } catch {
+      setError("Could not reach the server. Please try again shortly.");
+    }
   }
 
   async function handleStartSync() {
-    await fetch("/sync/start", { method: "POST" });
+    try {
+      const res = await fetch("/sync/start", { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json();
+        if (body.error) {
+          setError(
+            "There was an issue completing this sync. Please try again shortly.",
+          );
+        }
+      }
+    } catch {
+      setError(
+        "There was an issue completing this sync. Please try again shortly.",
+      );
+    }
   }
 
   async function handleAbort() {
-    await fetch("/sync/abort", { method: "POST" });
+    try {
+      await fetch("/sync/abort", { method: "POST" });
+    } catch {
+      setError("Could not stop sync. Please try again shortly.");
+    }
   }
 
   const counts = syncStatus?.fileCounts ?? {};
@@ -115,7 +147,14 @@ export default function App() {
     <>
       <div className="container">
         <h1>Drive → Photos Sync</h1>
-
+        {error && (
+          <div className="error-banner">
+            ⚠️ {error}
+            <button className="error-dismiss" onClick={() => setError(null)}>
+              ✕
+            </button>
+          </div>
+        )}
         <div className="card">
           <div className="status-row">
             <div className="status-label-group">
@@ -162,8 +201,14 @@ export default function App() {
             <Stat label="Skipped" value={counts.skipped ?? 0} color="gray" />
           </div>
 
-          <button className="btn-secondary btn-files" onClick={handleToggleFiles}>
-            Show uploaded files <span className={`chevron ${showFiles ? "chevron-up" : ""}`}>›</span>
+          <button
+            className="btn-secondary btn-files"
+            onClick={handleToggleFiles}
+          >
+            Show uploaded files{" "}
+            <span className={`chevron ${showFiles ? "chevron-up" : ""}`}>
+              ›
+            </span>
           </button>
 
           {showFiles && (
@@ -174,7 +219,9 @@ export default function App() {
               {uploadedFiles.map((f) => (
                 <li key={f.id} className="file-list-item">
                   <span className="file-name">{f.name}</span>
-                  <span className="file-meta">{(f.size / 1024 / 1024).toFixed(1)} MB</span>
+                  <span className="file-meta">
+                    {(f.size / 1024 / 1024).toFixed(1)} MB
+                  </span>
                 </li>
               ))}
             </ul>
