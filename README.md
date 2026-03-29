@@ -35,7 +35,7 @@ npm run db:start
 createdb drive_photos_sync
 ```
 
-### Google Cloud setup
+### Google Cloud Initial Setup
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com)
 2. Create a project and enable:
@@ -44,8 +44,9 @@ createdb drive_photos_sync
 3. Create an OAuth 2.0 Client ID under **Credentials**
 4. Add `http://localhost:3000/auth/callback` as an authorized redirect URI
 5. Copy your Client ID and Client Secret
-6. Make sure Google Drive & Google Photos are set up as enabled APIs for this project.
-7. Add Drive & Photos to your OAuth Scopes:
+6. Add test/localdev users to OAuth Consent Screen Audience
+7. Make sure Google Drive & Google Photos are set up as enabled APIs for this project.
+8. Add Drive & Photos to your OAuth Scopes:
 
 - https://www.googleapis.com/auth/drive.readonly
 - https://www.googleapis.com/auth/photoslibrary.appendonly
