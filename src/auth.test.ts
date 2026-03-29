@@ -50,7 +50,32 @@ describe("handleCallback", () => {
     }));
 
     await expect(handleCallback("some-code")).rejects.toThrow(
-      "You must grant all permissions to use this app. Missing: https://www.googleapis.com/auth/photoslibrary",
+      "You must grant all permissions to use this app. Missing: https://www.googleapis.com/auth/photoslibrary.appendonly",
+    );
+  });
+
+  it("throws if the user grants photoslibrary instead of photoslibrary.appendonly", async () => {
+    // Regression test: the old scope (photoslibrary) caused a 403 from the Photos API.
+    // The required scope is specifically photoslibrary.appendonly.
+    MockOAuth2.mockImplementation(() => ({
+      getToken: jest.fn().mockResolvedValue({
+        tokens: {
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+          expiry_date: 9999999999,
+          scope: [
+            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/photoslibrary", // wrong scope — missing .appendonly
+            "https://www.googleapis.com/auth/userinfo.profile",
+          ].join(" "),
+        },
+      }),
+      setCredentials: jest.fn(),
+      on: jest.fn(),
+    }));
+
+    await expect(handleCallback("some-code")).rejects.toThrow(
+      "Missing: https://www.googleapis.com/auth/photoslibrary.appendonly",
     );
   });
 
@@ -82,7 +107,7 @@ describe("handleCallback", () => {
           expiry_date: 9999999999,
           scope: [
             "https://www.googleapis.com/auth/drive.readonly",
-            "https://www.googleapis.com/auth/photoslibrary",
+            "https://www.googleapis.com/auth/photoslibrary.appendonly",
             "https://www.googleapis.com/auth/userinfo.profile",
           ].join(" "),
         },

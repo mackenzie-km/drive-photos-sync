@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
+import path from "path";
 import routes from "./routes";
 import { initDb } from "./db";
 
@@ -35,6 +36,14 @@ app.use(
 );
 
 app.use(routes);
+
+if (process.env.NODE_ENV === "production") {
+  const clientDist = path.join(__dirname, "../../client/dist");
+  app.use(express.static(clientDist));
+  app.get("*", (_req, res) => {
+    res.sendFile(path.join(clientDist, "index.html"));
+  });
+}
 
 const PORT = process.env.PORT ?? 3000;
 

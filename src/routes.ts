@@ -17,22 +17,17 @@ router.get("/auth/url", (_req: Request, res: Response) => {
 router.get("/auth/callback", async (req: Request, res: Response) => {
   const code = req.query.code as string;
   if (!code) {
-    res.status(400).json({ error: "Missing code parameter" });
+    res.redirect(`${process.env.FRONTEND_URL ?? "http://localhost:5173"}/?auth_error=access_denied`);
     return;
   }
   try {
     const userId = await handleCallback(code);
     console.log(userId);
     (req.session as any).userId = userId;
-    res.send(
-      "<p>Authentication successful. You can close this tab and return to the terminal.</p>",
-    );
+    res.redirect(process.env.FRONTEND_URL ?? "http://localhost:5173");
   } catch (err: any) {
     console.error("[auth] callback error:", err);
-    // Send the user back to try again with a human-readable message in the page
-    res
-      .status(403)
-      .send(`<p>${err.message}</p><p><a href="/auth/url">Try again</a></p>`);
+    res.redirect(`${process.env.FRONTEND_URL ?? "http://localhost:5173"}/?auth_error=1`);
   }
 });
 
