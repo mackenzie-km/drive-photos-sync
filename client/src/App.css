@@ -23,6 +23,7 @@ body {
 
 .container.center {
   text-align: center;
+  padding-top: 50px;
 }
 
 h1 {
@@ -71,6 +72,36 @@ button:hover {
   box-shadow: 0 8px 20px rgba(214, 140, 69, 0.3);
 }
 
+.photo-stack-img {
+  width: 160px;
+  height: auto;
+  margin-bottom: 8px;
+  transition: transform 0.15s ease;
+  cursor: default;
+}
+
+@keyframes wiggle {
+  0%   { transform: rotate(0deg); }
+  25%  { transform: rotate(-3deg); }
+  50%  { transform: rotate(3deg); }
+  75%  { transform: rotate(-2deg); }
+  100% { transform: rotate(0deg); }
+}
+
+.photo-stack-img:hover {
+  animation: wiggle 0.5s ease;
+}
+
+.btn-google {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.google-logo {
+  flex-shrink: 0;
+}
+
 .btn-secondary {
   background: #ddd4c9;
   color: #141414;
@@ -80,6 +111,20 @@ button:hover {
 .btn-secondary:hover {
   box-shadow: 0 8px 20px rgba(0,0,0,0.1);
   opacity: 1;
+}
+
+.card.center {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.login-sub {
+  color: oklch(55.6% 0 0);
+  font-size: 1.05rem;
+  margin: 0;
 }
 
 .card {
@@ -111,6 +156,11 @@ button:hover {
   position: relative;
   display: inline-block;
   padding-bottom: 32px;
+}
+
+.card.center .status-heading {
+  font-size: 26px;
+  padding-bottom: 16px;
 }
 
 .status-heading-bar {
