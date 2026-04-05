@@ -11,6 +11,7 @@ interface SyncStatus {
     total: number;
     started_at: number;
     finished_at: number | null;
+    error?: string;
   } | null;
   fileCounts: {
     uninitialized?: number;
@@ -115,6 +116,11 @@ export default function MainPage() {
     <>
       <div className="container">
         <h1>📸 Drive → Photos Sync</h1>
+        {syncStatus?.latestRun?.error && (
+          <div className="error-banner">
+            ⚠️ {syncStatus.latestRun.error}
+          </div>
+        )}
         {error && (
           <div className="error-banner">
             ⚠️ {error}

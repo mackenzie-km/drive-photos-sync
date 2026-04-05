@@ -70,7 +70,6 @@ export async function startSync(userId: string): Promise<number> {
   // Fire and forget — progress is tracked in the DB and queryable via /sync/status
   runSync(userId, runId).catch((err) => {
     console.error("[sync] fatal error:", err.message);
-    // TODO: add logging here
     finishRun(userId, runId, "failed", 0, 0, 0, 0);
   });
 
@@ -84,13 +83,21 @@ async function runSync(userId: string, runId: number) {
   // Reset any files stuck in_progress from a previous crash back to uninitialized
   await resetStuckFiles(userId);
 
+  const MAX_UPLOADS_PER_USER = 1000;
+
   // ── Phase 1: discover ──────────────────────────────────────────────────────
   state.status = "discovering";
-  console.log(`[sync:${userId}] Phase 1: discovering Drive photos...`);
+  const preCounts = await getFileCounts(userId);
+  const alreadyUploaded = Number(
+    preCounts.find((r) => r.status === "uploaded")?.count ?? 0,
+  );
+  const discoverLimit = MAX_UPLOADS_PER_USER - alreadyUploaded;
+  console.log(`[sync:${userId}] Phase 1: discovering Drive photos (limit: ${discoverLimit})...`);
   let discovered = 0;
 
   for await (const file of listDrivePhotos(auth)) {
     if (state.shouldAbort) break;
+    if (discovered >= discoverLimit) break;
     await upsertDriveFile(
       file.id,
       userId,
@@ -119,8 +126,6 @@ async function runSync(userId: string, runId: number) {
   const byStatus = Object.fromEntries(
     counts.map((r) => [r.status, Number(r.count)]),
   );
-  const MAX_UPLOADS_PER_USER = 1000;
-  const pending = (byStatus.uninitialized ?? 0) + (byStatus.failed ?? 0);
   const alreadyDone = byStatus.uploaded ?? 0;
   const remaining = MAX_UPLOADS_PER_USER - alreadyDone;
   console.log(`[sync:${userId}] Phase 2: Preparing to upload photos.`);
@@ -176,7 +181,6 @@ async function runSync(userId: string, runId: number) {
         uploaded++;
         console.log(`[sync:${userId}]   ✓ ${file.name} (${uploaded} uploaded)`);
       } catch (err: any) {
-        console.log("hit error", JSON.stringify(err));
         await updateFileStatus(
           "failed",
           null,
@@ -229,6 +233,3 @@ function finishRun(
   ).catch((err) => console.error("[sync] failed to update sync run:", err));
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}

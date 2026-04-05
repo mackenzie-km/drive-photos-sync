@@ -17,17 +17,20 @@ router.get("/auth/url", (_req: Request, res: Response) => {
 router.get("/auth/callback", async (req: Request, res: Response) => {
   const code = req.query.code as string;
   if (!code) {
-    res.redirect(`${process.env.FRONTEND_URL ?? "http://localhost:5173"}/?auth_error=access_denied`);
+    res.redirect(
+      `${process.env.FRONTEND_URL ?? "http://localhost:5173"}/?auth_error=access_denied`,
+    );
     return;
   }
   try {
     const userId = await handleCallback(code);
-    console.log(userId);
     (req.session as any).userId = userId;
     res.redirect(process.env.FRONTEND_URL ?? "http://localhost:5173");
   } catch (err: any) {
     console.error("[auth] callback error:", err);
-    res.redirect(`${process.env.FRONTEND_URL ?? "http://localhost:5173"}/?auth_error=1`);
+    res.redirect(
+      `${process.env.FRONTEND_URL ?? "http://localhost:5173"}/?auth_error=1`,
+    );
   }
 });
 
@@ -54,6 +57,8 @@ function requireAuth(req: Request, res: Response, next: Function) {
 }
 
 // ── Sync ──────────────────────────────────────────────────────────────────────
+const SYNC_TIMEOUT_SECS = 3 * 60 * 60; // 3 hours
+
 router.post("/sync/start", requireAuth, async (req: Request, res: Response) => {
   try {
     const runId = await startSync((req as any).userId);
@@ -78,6 +83,20 @@ router.get("/sync/status", requireAuth, async (req: Request, res: Response) => {
   const fileCounts = Object.fromEntries(
     countsRaw.map((r) => [r.status, r.count]),
   );
+
+  // - No active in-memory sync (e.g. server restart) → show error
+  // - Active sync but exceeded 3-hour timeout → request abort, show error
+  if (latestRun?.status === "running") {
+    const noActiveSync = state.status === "idle";
+    const isStale =
+      Math.floor(Date.now() / 1000) - latestRun.started_at > SYNC_TIMEOUT_SECS;
+    if (noActiveSync || isStale) {
+      if (isStale && !noActiveSync) requestAbort(userId);
+      latestRun.status = "failed";
+      latestRun.error = "Sync was interrupted. Start a new sync to resume.";
+    }
+  }
+
   res.json({ ...state, latestRun: latestRun ?? null, fileCounts });
 });
 

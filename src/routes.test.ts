@@ -23,10 +23,14 @@ import session from "express-session";
 import request from "supertest";
 import routes from "./routes";
 import { handleCallback } from "./auth";
-import { startSync } from "./sync";
+import { startSync, getSyncState, requestAbort } from "./sync";
+import { getLatestSyncRun } from "./db";
 
 const mockHandleCallback = handleCallback as jest.Mock;
 const mockStartSync = startSync as jest.Mock;
+const mockGetSyncState = getSyncState as jest.Mock;
+const mockGetLatestSyncRun = getLatestSyncRun as jest.Mock;
+const mockRequestAbort = requestAbort as jest.Mock;
 
 // Creates a minimal Express app with session middleware.
 // Pass a userId to simulate an already-authenticated session.
@@ -51,6 +55,42 @@ describe("POST /sync/start", () => {
     const res = await request(createApp("user-123")).post("/sync/start");
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("A sync is already running");
+  });
+});
+
+describe("GET /sync/status — stale run correction", () => {
+  const now = Math.floor(Date.now() / 1000);
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it("marks a running run as failed when there is no active in-memory sync", async () => {
+    mockGetSyncState.mockReturnValue({ status: "idle", currentFile: null, runId: null });
+    mockGetLatestSyncRun.mockResolvedValue({ status: "running", started_at: now - 60 });
+
+    const res = await request(createApp("user-123")).get("/sync/status");
+    expect(res.status).toBe(200);
+    expect(res.body.latestRun.status).toBe("failed");
+    expect(mockRequestAbort).not.toHaveBeenCalled();
+  });
+
+  it("marks a running run as failed and aborts when it has exceeded the 3-hour timeout", async () => {
+    mockGetSyncState.mockReturnValue({ status: "uploading", currentFile: null, runId: 1 });
+    mockGetLatestSyncRun.mockResolvedValue({ status: "running", started_at: now - 4 * 60 * 60 });
+
+    const res = await request(createApp("user-123")).get("/sync/status");
+    expect(res.status).toBe(200);
+    expect(res.body.latestRun.status).toBe("failed");
+    expect(mockRequestAbort).toHaveBeenCalledWith("user-123");
+  });
+
+  it("leaves a running run alone when a sync is active and within the timeout", async () => {
+    mockGetSyncState.mockReturnValue({ status: "uploading", currentFile: "photo.jpg", runId: 1 });
+    mockGetLatestSyncRun.mockResolvedValue({ status: "running", started_at: now - 60 });
+
+    const res = await request(createApp("user-123")).get("/sync/status");
+    expect(res.status).toBe(200);
+    expect(res.body.latestRun.status).toBe("running");
+    expect(mockRequestAbort).not.toHaveBeenCalled();
   });
 });
 
