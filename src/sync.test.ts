@@ -24,11 +24,12 @@ jest.mock("./db", () => ({
   createSyncRun: jest.fn().mockResolvedValue(1),
   updateSyncRun: jest.fn().mockResolvedValue(undefined),
   getFileCounts: jest.fn().mockResolvedValue([]),
+  getMd5Uploaded: jest.fn().mockResolvedValue(null),
 }));
 
-import { startSync } from "./sync";
+import { startSync, requestAbort, getSyncState } from "./sync";
 import { generatePhotoDescription } from "./gemini";
-import { updateSyncRun } from "./db";
+import { updateSyncRun, updateFileStatus, getMd5Uploaded } from "./db";
 import { listDrivePhotos, streamDriveFile } from "./drive";
 import { getUninitializedFiles } from "./db";
 
@@ -36,6 +37,8 @@ const mockGeneratePhotoDescription = generatePhotoDescription as jest.Mock;
 const mockListDrivePhotos = listDrivePhotos as jest.Mock;
 const mockGetUninitializedFiles = getUninitializedFiles as jest.Mock;
 const mockUpdateSyncRun = updateSyncRun as jest.Mock;
+const mockUpdateFileStatus = updateFileStatus as jest.Mock;
+const mockGetMd5Uploaded = getMd5Uploaded as jest.Mock;
 
 // Polls until condition is true — used because runSync runs fire-and-forget.
 async function waitFor(condition: () => boolean, timeoutMs = 3000) {
@@ -63,6 +66,66 @@ const FILE_WITHOUT_THUMB = {
   thumbnail_link: null,
   retry_count: 0,
 };
+
+describe("requestAbort", () => {
+  it("clears the sync state so status returns idle", async () => {
+    await startSync("user-abort-1");
+    expect(getSyncState("user-abort-1").status).not.toBe("idle");
+
+    requestAbort("user-abort-1");
+    expect(getSyncState("user-abort-1").status).toBe("idle");
+  });
+});
+
+describe("startSync — MD5 dedup", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockListDrivePhotos.mockImplementation(async function* () {});
+  });
+
+  it("marks a file as skipped when another file with the same md5 is already uploaded", async () => {
+    const DUPE_MD5 = "406c42808df1d62ef77796cac292e827";
+
+    mockGetUninitializedFiles
+      .mockResolvedValueOnce([{ ...FILE_WITH_THUMB, md5: DUPE_MD5 }])
+      .mockResolvedValue([]);
+
+    // Simulate an already-uploaded file with the same md5
+    mockGetMd5Uploaded.mockResolvedValue({ id: "already-uploaded-file" });
+
+    await startSync("user-dedup-1");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockUpdateFileStatus).toHaveBeenCalledWith(
+      "skipped",
+      null,
+      "duplicate md5",
+      0,
+      FILE_WITH_THUMB.id,
+      "user-dedup-1",
+    );
+  });
+
+  it("does not skip a file when no other file with the same md5 is uploaded", async () => {
+    mockGetUninitializedFiles
+      .mockResolvedValueOnce([FILE_WITH_THUMB])
+      .mockResolvedValue([]);
+
+    mockGetMd5Uploaded.mockResolvedValue(null);
+
+    await startSync("user-dedup-2");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockUpdateFileStatus).not.toHaveBeenCalledWith(
+      "skipped",
+      null,
+      "duplicate md5",
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+});
 
 describe("startSync — Gemini integration", () => {
   beforeEach(() => {

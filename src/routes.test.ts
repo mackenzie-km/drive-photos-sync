@@ -23,8 +23,10 @@ import session from "express-session";
 import request from "supertest";
 import routes from "./routes";
 import { handleCallback } from "./auth";
+import { startSync } from "./sync";
 
 const mockHandleCallback = handleCallback as jest.Mock;
+const mockStartSync = startSync as jest.Mock;
 
 // Creates a minimal Express app with session middleware.
 // Pass a userId to simulate an already-authenticated session.
@@ -40,6 +42,17 @@ function createApp(userId?: string) {
   app.use(routes);
   return app;
 }
+
+describe("POST /sync/start", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("returns 400 with an error message when a sync is already running", async () => {
+    mockStartSync.mockRejectedValue(new Error("A sync is already running"));
+    const res = await request(createApp("user-123")).post("/sync/start");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("A sync is already running");
+  });
+});
 
 describe("GET /auth/callback — auth errors redirect to FRONTEND_URL with a banner", () => {
   const DEFAULT_FRONTEND = "http://localhost:5173";

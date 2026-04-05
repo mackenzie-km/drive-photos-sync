@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 interface SyncStatus {
-  status: "idle" | "discovering" | "uploading" | "done" | "failed" | "aborted";
+  status: "idle" | "discovering" | "uploading" | "done" | "failed" | "aborted" | "limit_reached";
   currentFile: string | null;
   runId: number | null;
   latestRun: {
@@ -36,6 +36,7 @@ const STATUS_LABEL: Record<string, string> = {
   done: "✅ Done",
   failed: "❌ Failed",
   aborted: "🛑 Aborted",
+  limit_reached: "⚠️ Upload limit reached",
 };
 
 const IS_RUNNING = (status: string) =>
@@ -161,7 +162,7 @@ export default function MainPage() {
             <Stat label="Uploaded" value={counts.uploaded ?? 0} color="green" />
             <Stat label="Pending" value={counts.uninitialized ?? 0} color="blue" />
             <Stat label="Failed" value={counts.failed ?? 0} color="red" />
-            <Stat label="Skipped" value={counts.skipped ?? 0} color="gray" />
+            <Stat label="Duplicates" value={counts.skipped ?? 0} color="gray" />
           </div>
 
           <button

@@ -11,6 +11,7 @@ import {
   createSyncRun,
   updateSyncRun,
   getFileCounts,
+  getMd5Uploaded,
 } from "./db";
 
 type SyncStatus =
@@ -19,12 +20,18 @@ type SyncStatus =
   | "uploading"
   | "done"
   | "failed"
-  | "aborted";
+  | "aborted"
+  | "limit_reached";
 
 // Per-user sync state — keyed by userId so concurrent users don't interfere
 const userSyncState = new Map<
   string,
-  { runId: number; status: SyncStatus; shouldAbort: boolean; currentFile: string | null }
+  {
+    runId: number;
+    status: SyncStatus;
+    shouldAbort: boolean;
+    currentFile: string | null;
+  }
 >();
 
 export function getSyncState(userId: string) {
@@ -38,7 +45,11 @@ export function getSyncState(userId: string) {
 
 export function requestAbort(userId: string) {
   const state = userSyncState.get(userId);
-  if (state) state.shouldAbort = true;
+  if (state) {
+    state.shouldAbort = true;
+    // Resets state so user can re-run
+    userSyncState.delete(userId);
+  }
 }
 
 export async function startSync(userId: string): Promise<number> {
@@ -90,8 +101,6 @@ async function runSync(userId: string, runId: number) {
       file.thumbnailLink,
     );
     discovered++;
-    // TODO: remove
-    break;
     if (discovered % 500 === 0)
       console.log(`[sync:${userId}]   ${discovered} files found so far...`);
   }
@@ -119,7 +128,7 @@ async function runSync(userId: string, runId: number) {
     console.log(
       `[sync:${userId}] Upload limit of ${MAX_UPLOADS_PER_USER} reached.`,
     );
-    return finishRun(userId, runId, "done", discovered, 0, 0, 0);
+    return finishRun(userId, runId, "limit_reached", discovered, 0, 0, 0);
   }
   let uploaded = 0,
     skipped = 0,
@@ -135,22 +144,20 @@ async function runSync(userId: string, runId: number) {
     for (const file of batch) {
       if (state.shouldAbort) break;
       if (uploaded >= remaining) break;
-
-      // TODO: Test
       try {
         // Dedup: if another file with the same md5 was already uploaded, skip
-        // if (file.md5 && (await getMd5Uploaded(userId, file.md5))) {
-        //   await updateFileStatus(
-        //     "skipped",
-        //     null,
-        //     "duplicate md5",
-        //     0,
-        //     file.id,
-        //     userId,
-        //   );
-        //   skipped++;
-        //   continue;
-        // }
+        if (file.md5 && (await getMd5Uploaded(userId, file.md5))) {
+          await updateFileStatus(
+            "skipped",
+            null,
+            "duplicate md5",
+            0,
+            file.id,
+            userId,
+          );
+          skipped++;
+          continue;
+        }
 
         state.currentFile = file.name;
         await markFileInProgress(file.id, userId);
@@ -168,9 +175,6 @@ async function runSync(userId: string, runId: number) {
         await updateFileStatus("uploaded", mediaId, null, 0, file.id, userId);
         uploaded++;
         console.log(`[sync:${userId}]   ✓ ${file.name} (${uploaded} uploaded)`);
-
-        // Polite delay to stay within Google's rate limits
-        await sleep(250);
       } catch (err: any) {
         console.log("hit error", JSON.stringify(err));
         await updateFileStatus(
