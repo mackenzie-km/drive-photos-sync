@@ -1,3 +1,4 @@
+import { withRetry } from "./retry";
 import { getAuthClient } from "./auth";
 import { listDrivePhotos, streamDriveFile } from "./drive";
 import { generatePhotoDescription } from "./gemini";
@@ -92,7 +93,9 @@ async function runSync(userId: string, runId: number) {
     preCounts.find((r) => r.status === "uploaded")?.count ?? 0,
   );
   const discoverLimit = MAX_UPLOADS_PER_USER - alreadyUploaded;
-  console.log(`[sync:${userId}] Phase 1: discovering Drive photos (limit: ${discoverLimit})...`);
+  console.log(
+    `[sync:${userId}] Phase 1: discovering Drive photos (limit: ${discoverLimit})...`,
+  );
   let discovered = 0;
 
   for await (const file of listDrivePhotos(auth)) {
@@ -167,19 +170,18 @@ async function runSync(userId: string, runId: number) {
         state.currentFile = file.name;
         await markFileInProgress(file.id, userId);
         const description = file.thumbnail_link
-          ? await generatePhotoDescription(file.thumbnail_link)
+          ? await withRetry(() => {
+              return generatePhotoDescription(file.thumbnail_link!);
+            })
           : undefined;
         const stream = await streamDriveFile(auth, file.id);
-        const mediaId = await uploadPhoto(
-          auth,
-          stream,
-          file.name,
-          file.mime_type,
-          description,
+        const mediaId = await withRetry(() =>
+          uploadPhoto(auth, stream, file.name, file.mime_type, description),
         );
         await updateFileStatus("uploaded", mediaId, null, 0, file.id, userId);
         uploaded++;
         console.log(`[sync:${userId}]   ✓ ${file.name} (${uploaded} uploaded)`);
+        await sleep(50);
       } catch (err: any) {
         await updateFileStatus(
           "failed",
@@ -210,6 +212,10 @@ async function runSync(userId: string, runId: number) {
   );
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function finishRun(
   userId: string,
   runId: number,
@@ -232,4 +238,3 @@ function finishRun(
     userId,
   ).catch((err) => console.error("[sync] failed to update sync run:", err));
 }
-
