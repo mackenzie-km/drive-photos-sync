@@ -9,6 +9,7 @@ import {
   markFileInProgress,
   updateFileStatus,
   resetStuckFiles,
+  resetFailedFiles,
   createSyncRun,
   updateSyncRun,
   getFileCounts,
@@ -83,6 +84,8 @@ async function runSync(userId: string, runId: number) {
 
   // Reset any files stuck in_progress from a previous crash back to uninitialized
   await resetStuckFiles(userId);
+  // Give previously failed files another chance on each manual sync
+  await resetFailedFiles(userId);
 
   const MAX_UPLOADS_PER_USER = 1000;
 
@@ -181,7 +184,6 @@ async function runSync(userId: string, runId: number) {
         await updateFileStatus("uploaded", mediaId, null, 0, file.id, userId);
         uploaded++;
         console.log(`[sync:${userId}]   ✓ ${file.name} (${uploaded} uploaded)`);
-        await sleep(50);
       } catch (err: any) {
         await updateFileStatus(
           "failed",

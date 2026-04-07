@@ -149,6 +149,15 @@ export async function resetStuckFiles(userId: string) {
   );
 }
 
+// Reset failed files so they're retried on the next sync
+export async function resetFailedFiles(userId: string) {
+  await query(
+    `UPDATE drive_files SET status = 'uninitialized', retry_count = 0
+     WHERE user_id = $1 AND status = 'failed'`,
+    [userId],
+  );
+}
+
 // Pick up both fresh uninitialized files and failed files that haven't exceeded the retry limit
 export async function getUninitializedFiles(userId: string) {
   const result = await query(

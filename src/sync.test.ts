@@ -21,6 +21,7 @@ jest.mock("./db", () => ({
   markFileInProgress: jest.fn().mockResolvedValue(undefined),
   updateFileStatus: jest.fn().mockResolvedValue(undefined),
   resetStuckFiles: jest.fn().mockResolvedValue(undefined),
+  resetFailedFiles: jest.fn().mockResolvedValue(undefined),
   createSyncRun: jest.fn().mockResolvedValue(1),
   updateSyncRun: jest.fn().mockResolvedValue(undefined),
   getFileCounts: jest.fn().mockResolvedValue([]),

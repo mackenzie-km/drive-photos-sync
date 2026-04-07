@@ -2,8 +2,18 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Retries a function up to maxRetries times on 429 rate-limit errors,
-// with exponential backoff. All other errors are rethrown immediately.
+const RETRYABLE_CODES = new Set(["ENOTFOUND", "ECONNRESET", "ETIMEDOUT"]);
+
+function isRetryable(err: any): boolean {
+  return (
+    err.response?.status === 429 ||
+    err.status === 429 ||
+    RETRYABLE_CODES.has(err.code)
+  );
+}
+
+// Retries a function up to maxRetries times on 429s and transient network
+// errors, with exponential backoff. All other errors are rethrown immediately.
 export async function withRetry<T>(
   fn: () => Promise<T>,
   maxRetries = 3,
@@ -14,10 +24,9 @@ export async function withRetry<T>(
     try {
       return await fn();
     } catch (err: any) {
-      const is429 = err.response?.status === 429 || err.status === 429;
-      if (!is429 || attempt === maxRetries) throw err;
+      if (!isRetryable(err) || attempt === maxRetries) throw err;
       console.warn(
-        `[retry] Rate limited — retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,
+        `[retry] Transient error (${err.code ?? err.status ?? err.response?.status}) — retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,
       );
       await sleep(delay);
       delay *= 2;

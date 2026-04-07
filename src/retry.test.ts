@@ -42,9 +42,21 @@ describe("withRetry", () => {
     expect(fn).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
   });
 
-  it("does not retry non-429 errors", async () => {
+  it("does not retry non-retryable errors", async () => {
     const fn = jest.fn().mockRejectedValue(new Error("bad request"));
     await expect(withRetry(fn, 3, 0)).rejects.toThrow("bad request");
     expect(fn).toHaveBeenCalledTimes(1);
   });
+
+  it.each(["ENOTFOUND", "ECONNRESET", "ETIMEDOUT"])(
+    "retries on %s and succeeds on the second attempt",
+    async (code) => {
+      const fn = jest
+        .fn()
+        .mockRejectedValueOnce({ code })
+        .mockResolvedValue("ok");
+      await expect(withRetry(fn, 3, 0)).resolves.toBe("ok");
+      expect(fn).toHaveBeenCalledTimes(2);
+    },
+  );
 });
