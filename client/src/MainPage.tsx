@@ -140,7 +140,7 @@ export default function MainPage() {
   return (
     <>
       <div className="container">
-        <h1>📸 Tag and Sync</h1>
+        <h1><span className="h1-emoji">📸</span> Tag and Sync</h1>
         {syncStatus?.latestRun?.error && (
           <div className="error-banner">⚠️ {syncStatus.latestRun.error}</div>
         )}

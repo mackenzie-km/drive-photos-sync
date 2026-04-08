@@ -217,6 +217,20 @@ button:hover {
   gap: 12px;
 }
 
+@media (max-width: 480px) {
+  .counts {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  h1 {
+    font-size: 42px;
+  }
+
+  .h1-emoji {
+    display: block;
+  }
+}
+
 .stat {
   text-align: center;
   padding: 18px 12px;
