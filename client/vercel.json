@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    {
+      "source": "/auth/callback",
+      "destination": "/api/auth/callback"
+    },
+    {
+      "source": "/auth/:path*",
+      "destination": "https://drive-photos-sync.onrender.com/auth/:path*"
+    },
+    {
+      "source": "/sync/:path*",
+      "destination": "https://drive-photos-sync.onrender.com/sync/:path*"
+    }
+  ]
+}

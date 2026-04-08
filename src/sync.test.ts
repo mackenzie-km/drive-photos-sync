@@ -22,6 +22,7 @@ jest.mock("./db", () => ({
   updateFileStatus: jest.fn().mockResolvedValue(undefined),
   resetStuckFiles: jest.fn().mockResolvedValue(undefined),
   resetFailedFiles: jest.fn().mockResolvedValue(undefined),
+  clearUninitializedFiles: jest.fn().mockResolvedValue(undefined),
   createSyncRun: jest.fn().mockResolvedValue(1),
   updateSyncRun: jest.fn().mockResolvedValue(undefined),
   getFileCounts: jest.fn().mockResolvedValue([]),
@@ -70,7 +71,7 @@ const FILE_WITHOUT_THUMB = {
 
 describe("requestAbort", () => {
   it("clears the sync state so status returns idle", async () => {
-    await startSync("user-abort-1");
+    await startSync("user-abort-1", true);
     expect(getSyncState("user-abort-1").status).not.toBe("idle");
 
     requestAbort("user-abort-1");
@@ -94,7 +95,7 @@ describe("startSync — MD5 dedup", () => {
     // Simulate an already-uploaded file with the same md5
     mockGetMd5Uploaded.mockResolvedValue({ id: "already-uploaded-file" });
 
-    await startSync("user-dedup-1");
+    await startSync("user-dedup-1", true);
     await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
 
     expect(mockUpdateFileStatus).toHaveBeenCalledWith(
@@ -114,7 +115,7 @@ describe("startSync — MD5 dedup", () => {
 
     mockGetMd5Uploaded.mockResolvedValue(null);
 
-    await startSync("user-dedup-2");
+    await startSync("user-dedup-2", true);
     await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
 
     expect(mockUpdateFileStatus).not.toHaveBeenCalledWith(
@@ -154,7 +155,7 @@ describe("startSync — Gemini integration", () => {
       "sunset, beach, ocean, couple, silhouette, golden hour, romantic, waves, sand, travel",
     );
 
-    await startSync("user-gemini-1");
+    await startSync("user-gemini-1", true);
 
     await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
 
@@ -179,7 +180,7 @@ describe("startSync — Gemini integration", () => {
       .mockResolvedValueOnce([FILE_WITHOUT_THUMB])
       .mockResolvedValue([]);
 
-    await startSync("user-gemini-2");
+    await startSync("user-gemini-2", true);
 
     await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
 

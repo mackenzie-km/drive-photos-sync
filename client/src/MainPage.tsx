@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 
 interface SyncStatus {
-  status: "idle" | "discovering" | "uploading" | "done" | "failed" | "aborted" | "limit_reached";
+  status:
+    | "idle"
+    | "discovering"
+    | "uploading"
+    | "done"
+    | "failed"
+    | "aborted"
+    | "limit_reached";
   currentFile: string | null;
   runId: number | null;
   latestRun: {
@@ -48,6 +55,7 @@ export default function MainPage() {
   const [showFiles, setShowFiles] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [useAI, setUseAI] = useState(true);
 
   useEffect(() => {
     const poll = () => {
@@ -55,7 +63,9 @@ export default function MainPage() {
         .then((r) => r.json())
         .then(setSyncStatus)
         .catch(() =>
-          setError("Unable to reach the server. Please try refreshing the page."),
+          setError(
+            "Unable to reach the server. Please try refreshing the page.",
+          ),
         );
     };
     poll();
@@ -81,8 +91,23 @@ export default function MainPage() {
 
   async function handleStartSync() {
     try {
-      const res = await fetch("/sync/start", { method: "POST" });
-      if (!res.ok) {
+      const res = await fetch("/sync/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ useAI }),
+      });
+      if (res.ok) {
+        setSyncStatus((prev) =>
+          prev
+            ? {
+                ...prev,
+                latestRun: prev.latestRun
+                  ? { ...prev.latestRun, error: undefined, failed: 0 }
+                  : null,
+              }
+            : null,
+        );
+      } else {
         const body = await res.json();
         if (body.error) {
           setError(
@@ -115,11 +140,9 @@ export default function MainPage() {
   return (
     <>
       <div className="container">
-        <h1>📸 Drive → Photos Sync</h1>
+        <h1>📸 Tag and Sync</h1>
         {syncStatus?.latestRun?.error && (
-          <div className="error-banner">
-            ⚠️ {syncStatus.latestRun.error}
-          </div>
+          <div className="error-banner">⚠️ {syncStatus.latestRun.error}</div>
         )}
         {!syncStatus?.latestRun?.error &&
           syncStatus?.status === "done" &&
@@ -154,6 +177,17 @@ export default function MainPage() {
               <button onClick={handleStartSync}>▶ Start Sync</button>
             )}
           </div>
+          {
+            <label className="ai-toggle">
+              <input
+                type="checkbox"
+                checked={useAI}
+                disabled={IS_RUNNING(status)}
+                onChange={(e) => setUseAI(e.target.checked)}
+              />{" "}
+              Use AI descriptions (slower, up to 1,000 photos)
+            </label>
+          }
           <p className="tagline">
             Syncs your photos from Google Drive to Google Photos ✨ using AI ✨
             to add search-friendly labels along the way! Skips duplicates and
@@ -175,7 +209,11 @@ export default function MainPage() {
 
           <div className="counts">
             <Stat label="Uploaded" value={counts.uploaded ?? 0} color="green" />
-            <Stat label="Pending" value={counts.uninitialized ?? 0} color="blue" />
+            <Stat
+              label="Pending"
+              value={counts.uninitialized ?? 0}
+              color="blue"
+            />
             <Stat label="Failed" value={counts.failed ?? 0} color="red" />
             <Stat label="Duplicates" value={counts.skipped ?? 0} color="gray" />
           </div>
@@ -210,10 +248,21 @@ export default function MainPage() {
       <footer className="footer">
         <p>
           Made with care by{" "}
-          <a href="https://www.mackenziekg.dev" target="_blank" rel="noreferrer">
+          <a
+            href="https://www.mackenziekg.dev"
+            target="_blank"
+            rel="noreferrer"
+          >
             mackenziekg.dev
           </a>{" "}
-          in 2026. All rights reserved.
+          in 2026. All rights reserved. See my{" "}
+          <a
+            href="https://sync.mackenziekg.dev/privacy.html"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Privacy Policy
+          </a>
         </p>
       </footer>
     </>

@@ -158,6 +158,15 @@ export async function resetFailedFiles(userId: string) {
   );
 }
 
+// Clear uninitialized files before each sync so discovery re-populates them
+// up to the current limit — prevents stale counts from prior runs skewing the UI.
+export async function clearUninitializedFiles(userId: string) {
+  await query(
+    `DELETE FROM drive_files WHERE user_id = $1 AND status = 'uninitialized'`,
+    [userId],
+  );
+}
+
 // Pick up both fresh uninitialized files and failed files that haven't exceeded the retry limit
 export async function getUninitializedFiles(userId: string) {
   const result = await query(

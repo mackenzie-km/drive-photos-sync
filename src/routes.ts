@@ -16,20 +16,24 @@ router.get("/auth/url", (_req: Request, res: Response) => {
 // We exchange the code for tokens, fetch the user's stable Google userId, and store it in the session
 router.get("/auth/callback", async (req: Request, res: Response) => {
   const code = req.query.code as string;
+  const frontendUrl = process.env.FRONTEND_URL ?? "http://localhost:5173";
   if (!code) {
-    res.redirect(
-      `${process.env.FRONTEND_URL ?? "http://localhost:5173"}/?auth_error=access_denied`,
+    res.send(
+      `<script>location.href=${JSON.stringify(`${frontendUrl}/?auth_error=access_denied`)}</script>`,
     );
     return;
   }
   try {
     const userId = await handleCallback(code);
     (req.session as any).userId = userId;
-    res.redirect(process.env.FRONTEND_URL ?? "http://localhost:5173");
+    req.session.save((err) => {
+      if (err) console.error("[auth] session save error:", err);
+      res.send(`<script>location.href=${JSON.stringify(frontendUrl)}</script>`);
+    });
   } catch (err: any) {
     console.error("[auth] callback error:", err);
-    res.redirect(
-      `${process.env.FRONTEND_URL ?? "http://localhost:5173"}/?auth_error=1`,
+    res.send(
+      `<script>location.href=${JSON.stringify(`${frontendUrl}/?auth_error=1`)}</script>`,
     );
   }
 });
@@ -61,7 +65,8 @@ const SYNC_TIMEOUT_SECS = 3 * 60 * 60; // 3 hours
 
 router.post("/sync/start", requireAuth, async (req: Request, res: Response) => {
   try {
-    const runId = await startSync((req as any).userId);
+    const useAI = req.body?.useAI !== false; // default true
+    const runId = await startSync((req as any).userId, useAI);
     res.json({ runId, message: "Sync started" });
   } catch (err: any) {
     res.status(400).json({ error: err.message });

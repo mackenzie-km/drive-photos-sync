@@ -1,5 +1,5 @@
 node_modules/
-dist/
+client/dist/
 .env*
 sync.db
 .claude

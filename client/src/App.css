@@ -28,9 +28,10 @@ body {
 
 h1 {
   font-family: 'Pacifico', serif;
-  font-size: 42px;
+  font-size: 56px;
   font-weight: 400;
   color: #141414;
+  margin-top: -32px;
   margin-bottom: 28px;
   line-height: 1.2;
   text-align: center;

@@ -76,6 +76,8 @@ npm run db:start
 npm run dev
 ```
 
+> **Deploying backend changes:** The backend compiles TypeScript to `dist/` which is what Render runs. A pre-commit hook runs `npm run build` automatically and stages `dist/` for you — just commit and push as normal. The frontend (Vercel) deploys directly from source and does not need a build step.
+
 ## API
 
 | Method | Route            | Description                               |
@@ -119,11 +121,21 @@ Set these environment variables in the Render dashboard:
 ```
 GOOGLE_CLIENT_ID
 GOOGLE_CLIENT_SECRET
-OAUTH_REDIRECT_URI=https://your-backend.onrender.com/auth/callback
+OAUTH_REDIRECT_URI=https://your-domain.com/auth/callback  # must match Google Cloud Console
 DATABASE_URL        # provided automatically by Render Postgres addon
 SESSION_SECRET
-FRONTEND_URL=https://your-frontend.vercel.app
+FRONTEND_URL=https://your-domain.com
 NODE_ENV=production
 ```
 
-Also register `https://your-backend.onrender.com/auth/callback` as an authorized redirect URI in Google Cloud Console.
+Also register `https://your-domain.com/auth/callback` as an authorized redirect URI in Google Cloud Console.
+
+### Vercel (frontend)
+
+Set these environment variables in the Vercel project dashboard:
+
+```
+BACKEND_URL=https://your-backend.onrender.com
+```
+
+This is used by the `/api/auth/callback` serverless function, which proxies the OAuth callback from Google to the Render backend and forwards the `Set-Cookie` header back to the browser. Vercel's rewrite proxy strips `Set-Cookie` headers, so `/auth/callback` uses a serverless function instead — all other routes use rewrites in `vercel.json`.

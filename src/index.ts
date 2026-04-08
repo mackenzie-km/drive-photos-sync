@@ -3,13 +3,13 @@ import express from "express";
 import cors from "cors";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
-import path from "path";
 import routes from "./routes";
 import { initDb } from "./db";
 
 const PgStore = connectPg(session);
 
 const app = express();
+app.set("trust proxy", 1);
 app.use(
   cors({
     origin: process.env.FRONTEND_URL ?? "http://localhost:5173",
@@ -37,14 +37,6 @@ app.use(
 
 app.use(routes);
 
-if (process.env.NODE_ENV === "production") {
-  const clientDist = path.join(__dirname, "../../client/dist");
-  app.use(express.static(clientDist));
-  app.get("*", (_req, res) => {
-    res.sendFile(path.join(clientDist, "index.html"));
-  });
-}
-
 const PORT = process.env.PORT ?? 3000;
 
 // initDb runs CREATE TABLE IF NOT EXISTS — safe to run on every boot.
@@ -53,12 +45,18 @@ initDb()
   .then(() => {
     app.listen(PORT, () => {
       console.log(`\nServer running at http://localhost:${PORT}`);
-      console.log(`Step 1: GET  http://localhost:${PORT}/auth/url  → open that URL in your browser`);
-      console.log(`Step 2: POST http://localhost:${PORT}/sync/start → start the sync`);
-      console.log(`        GET  http://localhost:${PORT}/sync/status → check progress\n`);
+      console.log(
+        `Step 1: GET  http://localhost:${PORT}/auth/url  → open that URL in your browser`,
+      );
+      console.log(
+        `Step 2: POST http://localhost:${PORT}/sync/start → start the sync`,
+      );
+      console.log(
+        `        GET  http://localhost:${PORT}/sync/status → check progress\n`,
+      );
     });
   })
   .catch((err) => {
-    console.error('Failed to initialize database:', err);
+    console.error("Failed to initialize database:", err);
     process.exit(1);
   });

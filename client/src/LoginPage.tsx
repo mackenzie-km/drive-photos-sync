@@ -24,7 +24,7 @@ export default function LoginPage() {
   return (
     <>
       <div className="container">
-        <h1>📸 Drive → Photos Sync</h1>
+        <h1>📸 Tag and Sync</h1>
         {error && (
           <div className="error-banner">
             ⚠️ {error}
@@ -41,9 +41,9 @@ export default function LoginPage() {
           </span>
           <p className="tagline">
             Syncs your photos from Google Drive to Google Photos — ✨ using AI
-            ✨ to add search-friendly labels along the way! Skips duplicates
-            and resumes after crashes. You'll never have trouble finding your
-            Google Photos again.
+            ✨ to add search-friendly labels along the way! Skips duplicates and
+            resumes after crashes. You'll never have trouble finding your Google
+            Photos again.
           </p>
           <button className="btn-google" onClick={handleLogin}>
             <GoogleLogo />
@@ -54,10 +54,21 @@ export default function LoginPage() {
       <footer className="footer">
         <p>
           Made with care by{" "}
-          <a href="https://www.mackenziekg.dev" target="_blank" rel="noreferrer">
+          <a
+            href="https://www.mackenziekg.dev"
+            target="_blank"
+            rel="noreferrer"
+          >
             mackenziekg.dev
           </a>{" "}
-          in 2026. All rights reserved.
+          in 2026. All rights reserved. See my{" "}
+          <a
+            href="https://sync.mackenziekg.dev/privacy.html"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Privacy Policy
+          </a>
         </p>
       </footer>
     </>
@@ -66,7 +77,11 @@ export default function LoginPage() {
 
 function PhotoStack() {
   return (
-    <img src={stackOfPhotos} alt="stack of photos" className="photo-stack-img" />
+    <img
+      src={stackOfPhotos}
+      alt="stack of photos"
+      className="photo-stack-img"
+    />
   );
 }
 

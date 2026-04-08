@@ -10,6 +10,7 @@ import {
   updateFileStatus,
   resetStuckFiles,
   resetFailedFiles,
+  clearUninitializedFiles,
   createSyncRun,
   updateSyncRun,
   getFileCounts,
@@ -54,7 +55,10 @@ export function requestAbort(userId: string) {
   }
 }
 
-export async function startSync(userId: string): Promise<number> {
+export async function startSync(
+  userId: string,
+  useAI: boolean,
+): Promise<number> {
   const existing = userSyncState.get(userId);
   if (existing?.status === "discovering" || existing?.status === "uploading") {
     throw new Error("A sync is already running");
@@ -70,7 +74,7 @@ export async function startSync(userId: string): Promise<number> {
   });
 
   // Fire and forget — progress is tracked in the DB and queryable via /sync/status
-  runSync(userId, runId).catch((err) => {
+  runSync(userId, runId, useAI).catch((err) => {
     console.error("[sync] fatal error:", err.message);
     finishRun(userId, runId, "failed", 0, 0, 0, 0);
   });
@@ -78,7 +82,7 @@ export async function startSync(userId: string): Promise<number> {
   return runId;
 }
 
-async function runSync(userId: string, runId: number) {
+async function runSync(userId: string, runId: number, useAI: boolean) {
   const auth = await getAuthClient(userId);
   const state = userSyncState.get(userId)!;
 
@@ -86,8 +90,12 @@ async function runSync(userId: string, runId: number) {
   await resetStuckFiles(userId);
   // Give previously failed files another chance on each manual sync
   await resetFailedFiles(userId);
+  // Clear uninitialized files so discovery re-populates up to the current limit
+  await clearUninitializedFiles(userId);
 
-  const MAX_UPLOADS_PER_USER = 1000;
+  // Without AI, raise the limit since we're not incurring Gemini costs
+  // const MAX_UPLOADS_PER_USER = useAI ? 1000 : 10_000;
+  const MAX_UPLOADS_PER_USER = 10_000;
 
   // ── Phase 1: discover ──────────────────────────────────────────────────────
   state.status = "discovering";
@@ -172,11 +180,12 @@ async function runSync(userId: string, runId: number) {
 
         state.currentFile = file.name;
         await markFileInProgress(file.id, userId);
-        const description = file.thumbnail_link
-          ? await withRetry(() => {
-              return generatePhotoDescription(file.thumbnail_link!);
-            })
-          : undefined;
+        const description =
+          useAI && file.thumbnail_link
+            ? await withRetry(() =>
+                generatePhotoDescription(file.thumbnail_link!),
+              )
+            : undefined;
         const stream = await streamDriveFile(auth, file.id);
         const mediaId = await withRetry(() =>
           uploadPhoto(auth, stream, file.name, file.mime_type, description),
