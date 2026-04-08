@@ -234,11 +234,16 @@ button:hover {
   }
 
   h1 {
-    font-size: 72px;
+    font-size: 54px;
   }
 
   .h1-emoji {
     display: block;
+  }
+
+  .status-heading {
+    font-size: 26px;
+    padding-bottom: 24px;
   }
 }
 
