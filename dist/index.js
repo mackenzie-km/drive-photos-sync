@@ -10,6 +10,14 @@ const express_session_1 = __importDefault(require("express-session"));
 const connect_pg_simple_1 = __importDefault(require("connect-pg-simple"));
 const routes_1 = __importDefault(require("./routes"));
 const db_1 = require("./db");
+process.on("uncaughtException", (err) => {
+    console.error("[crash] uncaughtException:", err);
+    process.exit(1);
+});
+process.on("unhandledRejection", (reason) => {
+    console.error("[crash] unhandledRejection:", reason);
+    process.exit(1);
+});
 const PgStore = (0, connect_pg_simple_1.default)(express_session_1.default);
 const app = (0, express_1.default)();
 app.set("trust proxy", 1);
@@ -32,7 +40,16 @@ app.use((0, express_session_1.default)({
         maxAge: 7 * 24 * 60 * 60 * 1000, // 1 week
     },
 }));
+app.use((req, _res, next) => {
+    console.log(`[req] ${req.method} ${req.path}`);
+    next();
+});
 app.use(routes_1.default);
+// Catches any error passed to next(err) from route handlers
+app.use((err, req, res, _next) => {
+    console.error(`[error] ${req.method} ${req.path}`, err);
+    res.status(500).json({ error: "Internal server error" });
+});
 const PORT = process.env.PORT ?? 3000;
 // initDb runs CREATE TABLE IF NOT EXISTS — safe to run on every boot.
 // We wait for it to finish before accepting any requests.

@@ -1,9 +1,21 @@
 import { Router, Request, Response } from "express";
 import { getAuthUrl, handleCallback } from "./auth";
 import { startSync, getSyncState, requestAbort } from "./sync";
-import { getLatestSyncRun, getFileCounts, getUploadedFiles } from "./db";
+import { getLatestSyncRun, getFileCounts, getUploadedFiles, query } from "./db";
 
 const router = Router();
+
+// ── Health ────────────────────────────────────────────────────────────────────
+
+router.get("/health", async (_req: Request, res: Response) => {
+  try {
+    await query("SELECT 1");
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[health] DB check failed:", err);
+    res.status(503).json({ ok: false, error: "DB unavailable" });
+  }
+});
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 

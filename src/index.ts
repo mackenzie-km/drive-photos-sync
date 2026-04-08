@@ -6,6 +6,15 @@ import connectPg from "connect-pg-simple";
 import routes from "./routes";
 import { initDb } from "./db";
 
+process.on("uncaughtException", (err) => {
+  console.error("[crash] uncaughtException:", err);
+  process.exit(1);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[crash] unhandledRejection:", reason);
+  process.exit(1);
+});
+
 const PgStore = connectPg(session);
 
 const app = express();
@@ -35,7 +44,18 @@ app.use(
   }),
 );
 
+app.use((req, _res, next) => {
+  console.log(`[req] ${req.method} ${req.path}`);
+  next();
+});
+
 app.use(routes);
+
+// Catches any error passed to next(err) from route handlers
+app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error(`[error] ${req.method} ${req.path}`, err);
+  res.status(500).json({ error: "Internal server error" });
+});
 
 const PORT = process.env.PORT ?? 3000;
 

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Pacifico&family=Nunito:wght@500;600&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Pacifico&family=Nunito:wght@500;600&display=swap");
 
 * {
   box-sizing: border-box;
@@ -7,7 +7,7 @@
 }
 
 body {
-  font-family: 'Nunito', ui-sans-serif, system-ui, sans-serif;
+  font-family: "Nunito", ui-sans-serif, system-ui, sans-serif;
   font-weight: 500;
   background: #f8f5f2;
   color: #141414;
@@ -27,7 +27,7 @@ body {
 }
 
 h1 {
-  font-family: 'Pacifico', serif;
+  font-family: "Pacifico", serif;
   font-size: 56px;
   font-weight: 400;
   color: #141414;
@@ -38,7 +38,7 @@ h1 {
 }
 
 p {
-  font-family: 'Nunito', ui-sans-serif, system-ui, sans-serif;
+  font-family: "Nunito", ui-sans-serif, system-ui, sans-serif;
   font-size: 1.05rem;
   color: oklch(55.6% 0 0);
   margin-bottom: 20px;
@@ -52,7 +52,7 @@ p {
 }
 
 button {
-  font-family: 'Nunito', ui-sans-serif, system-ui, sans-serif;
+  font-family: "Nunito", ui-sans-serif, system-ui, sans-serif;
   font-weight: 600;
   font-size: 1rem;
   line-height: 1;
@@ -62,9 +62,10 @@ button {
   padding: 16px 32px;
   border-radius: 999px;
   cursor: pointer;
-  transition: opacity 0.15s cubic-bezier(.4,0,.2,1),
-              transform 0.15s cubic-bezier(.4,0,.2,1),
-              box-shadow 0.15s cubic-bezier(.4,0,.2,1);
+  transition:
+    opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+    transform 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 button:hover {
@@ -82,11 +83,21 @@ button:hover {
 }
 
 @keyframes wiggle {
-  0%   { transform: rotate(0deg); }
-  25%  { transform: rotate(-3deg); }
-  50%  { transform: rotate(3deg); }
-  75%  { transform: rotate(-2deg); }
-  100% { transform: rotate(0deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-3deg);
+  }
+  50% {
+    transform: rotate(3deg);
+  }
+  75% {
+    transform: rotate(-2deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
 }
 
 .photo-stack-img:hover {
@@ -110,7 +121,7 @@ button:hover {
 }
 
 .btn-secondary:hover {
-  box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
   opacity: 1;
 }
 
@@ -133,7 +144,7 @@ button:hover {
   border: 1px solid #e5e5e5;
   border-radius: 24px;
   padding: 32px;
-  box-shadow: 0 20px 40px rgba(0,0,0,0.06);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.06);
 }
 
 .status-row {
@@ -150,7 +161,7 @@ button:hover {
 }
 
 .status-heading {
-  font-family: 'Nunito', ui-sans-serif, system-ui, sans-serif;
+  font-family: "Nunito", ui-sans-serif, system-ui, sans-serif;
   font-size: 36px;
   font-weight: 600;
   color: #141414;
@@ -177,7 +188,7 @@ button:hover {
 }
 
 .status-text {
-  font-family: 'Nunito', ui-sans-serif, system-ui, sans-serif;
+  font-family: "Nunito", ui-sans-serif, system-ui, sans-serif;
   font-size: 1.05rem;
   font-weight: 500;
   color: oklch(43.9% 0 0);
@@ -197,7 +208,7 @@ button:hover {
   height: 100%;
   background: linear-gradient(to right, #c97d35, #d68c45);
   border-radius: 999px;
-  transition: width 0.5s cubic-bezier(.4,0,.2,1);
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .progress-label {
@@ -223,7 +234,7 @@ button:hover {
   }
 
   h1 {
-    font-size: 42px;
+    font-size: 72px;
   }
 
   .h1-emoji {
@@ -254,15 +265,27 @@ button:hover {
   opacity: 0.75;
 }
 
-.stat-green { background: #eaf5ec; color: #2a7a3b; }
-.stat-blue  { background: #f4d6b0; color: #c97d35; }
-.stat-red   { background: #fce8e6; color: #c0392b; }
-.stat-gray  { background: #f0ebe6; color: oklch(43.9% 0 0); }
+.stat-green {
+  background: #eaf5ec;
+  color: #2a7a3b;
+}
+.stat-blue {
+  background: #f4d6b0;
+  color: #c97d35;
+}
+.stat-red {
+  background: #fce8e6;
+  color: #c0392b;
+}
+.stat-gray {
+  background: #f0ebe6;
+  color: oklch(43.9% 0 0);
+}
 
 .chevron {
   display: inline-block;
   transform: rotate(90deg);
-  transition: transform 0.2s cubic-bezier(.4,0,.2,1);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   font-style: normal;
   font-size: 2rem;
   line-height: 1;
@@ -290,7 +313,7 @@ button:hover {
   font-weight: 500;
   padding: 14px 20px;
   border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   white-space: nowrap;
 }
 
@@ -306,7 +329,7 @@ button:hover {
   font-weight: 500;
   padding: 14px 20px;
   border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   white-space: nowrap;
 }
 
@@ -368,7 +391,9 @@ button:hover {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .spinner {
@@ -387,7 +412,7 @@ button:hover {
 }
 
 .footer p {
-  font-family: 'Pacifico', serif;
+  font-family: "Pacifico", serif;
   font-size: 0.85rem;
   color: #141414;
   margin: 0;
