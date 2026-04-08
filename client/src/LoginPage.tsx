@@ -24,7 +24,9 @@ export default function LoginPage() {
   return (
     <>
       <div className="container">
-        <h1>📸 Tag and Sync</h1>
+        <h1>
+          <span className="h1-emoji">📸</span> Tag and Sync
+        </h1>
         {error && (
           <div className="error-banner">
             ⚠️ {error}
