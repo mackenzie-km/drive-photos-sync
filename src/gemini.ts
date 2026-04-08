@@ -2,7 +2,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import axios from "axios";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
 const PROMPT =
   "Generate exactly 10 descriptive, search-friendly keywords for this photo. Return them as a single comma-separated list with no numbering, no extra punctuation, and no explanation. Example format: sunset, beach, ocean, couple, silhouette, golden hour, romantic, waves, sand, travel";
