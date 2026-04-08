@@ -139,132 +139,109 @@ export default function MainPage() {
 
   return (
     <>
-      <div className="container">
-        <h1><span className="h1-emoji">📸</span> Tag and Sync</h1>
-        {syncStatus?.latestRun?.error && (
-          <div className="error-banner">⚠️ {syncStatus.latestRun.error}</div>
-        )}
-        {!syncStatus?.latestRun?.error &&
-          syncStatus?.status === "done" &&
-          (syncStatus?.latestRun?.failed ?? 0) > 0 && (
-            <div className="error-banner">
-              ⚠️ {syncStatus.latestRun!.failed} file
-              {syncStatus.latestRun!.failed === 1 ? "" : "s"} failed to upload.
-              Start a new sync to retry.
-            </div>
-          )}
-        {error && (
+      {syncStatus?.latestRun?.error && (
+        <div className="error-banner">⚠️ {syncStatus.latestRun.error}</div>
+      )}
+      {!syncStatus?.latestRun?.error &&
+        syncStatus?.status === "done" &&
+        (syncStatus?.latestRun?.failed ?? 0) > 0 && (
           <div className="error-banner">
-            ⚠️ {error}
-            <button className="error-dismiss" onClick={() => setError(null)}>
-              ✕
-            </button>
+            ⚠️ {syncStatus.latestRun!.failed} file
+            {syncStatus.latestRun!.failed === 1 ? "" : "s"} failed to upload.
+            Start a new sync to retry.
           </div>
         )}
-        <div className="card">
-          <div className="status-row">
-            <div className="status-label-group">
-              <span className="status-heading">
-                {STATUS_LABEL[status] ?? status}
-                <span className="status-heading-bar" />
-              </span>
-            </div>
-            {IS_RUNNING(status) ? (
-              <button className="btn-secondary" onClick={handleAbort}>
-                ⏸ Abort
-              </button>
-            ) : (
-              <button onClick={handleStartSync}>▶ Start Sync</button>
-            )}
-          </div>
-          {
-            <label className="ai-toggle">
-              <input
-                type="checkbox"
-                checked={useAI}
-                disabled={IS_RUNNING(status)}
-                onChange={(e) => setUseAI(e.target.checked)}
-              />{" "}
-              Use AI descriptions (slower, up to 1,000 photos)
-            </label>
-          }
-          <p className="tagline">
-            Syncs your photos from Google Drive to Google Photos ✨ using AI ✨
-            to add search-friendly labels along the way! Skips duplicates and
-            resumes after crashes. You'll never have trouble finding your Google
-            Photos again.
-          </p>
-          <div className="progress-bar-track">
-            <div
-              className="progress-bar-fill"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-          <p className="progress-label">
-            {uploaded} / {total} uploaded
-            {currentFile && (
-              <span className="current-file"> · {currentFile}</span>
-            )}
-          </p>
-
-          <div className="counts">
-            <Stat label="Uploaded" value={counts.uploaded ?? 0} color="green" />
-            <Stat
-              label="Pending"
-              value={counts.uninitialized ?? 0}
-              color="blue"
-            />
-            <Stat label="Failed" value={counts.failed ?? 0} color="red" />
-            <Stat label="Duplicates" value={counts.skipped ?? 0} color="gray" />
-          </div>
-
-          <button
-            className="btn-secondary btn-files"
-            onClick={handleToggleFiles}
-          >
-            Show uploaded files{" "}
-            <span className={`chevron ${showFiles ? "chevron-up" : ""}`}>
-              ›
-            </span>
+      {error && (
+        <div className="error-banner">
+          ⚠️ {error}
+          <button className="error-dismiss" onClick={() => setError(null)}>
+            ✕
           </button>
-
-          {showFiles && (
-            <ul className="file-list">
-              {uploadedFiles.length === 0 && (
-                <li className="file-list-empty">No files uploaded yet.</li>
-              )}
-              {uploadedFiles.map((f) => (
-                <li key={f.id} className="file-list-item">
-                  <span className="file-name">{f.name}</span>
-                  <span className="file-meta">
-                    {(f.size / 1024 / 1024).toFixed(1)} MB
-                  </span>
-                </li>
-              ))}
-            </ul>
+        </div>
+      )}
+      <div className="card">
+        <div className="status-row">
+          <div className="status-label-group">
+            <span className="status-heading">
+              {STATUS_LABEL[status] ?? status}
+              <span className="status-heading-bar" />
+            </span>
+          </div>
+          {IS_RUNNING(status) ? (
+            <button className="btn-secondary" onClick={handleAbort}>
+              ⏸ Abort
+            </button>
+          ) : (
+            <button onClick={handleStartSync}>▶ Start Sync</button>
           )}
         </div>
-      </div>
-      <footer className="footer">
-        <p>
-          Made with care by{" "}
-          <a
-            href="https://www.mackenziekg.dev"
-            target="_blank"
-            rel="noreferrer"
-          >
-            mackenziekg.dev
-          </a>{" "}
-          in 2026. All rights reserved. See my{" "}
-          <a
-            href="https://sync.mackenziekg.dev/privacy.html"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Privacy Policy
-          </a>
+        {
+          <label className="ai-toggle">
+            <input
+              type="checkbox"
+              checked={useAI}
+              disabled={IS_RUNNING(status)}
+              onChange={(e) => setUseAI(e.target.checked)}
+            />{" "}
+            Use AI descriptions (slower, up to 1,000 photos)
+          </label>
+        }
+        <p className="tagline">
+          Syncs your photos from Google Drive to Google Photos ✨ using AI ✨
+          to add search-friendly labels along the way! Skips duplicates and
+          resumes after crashes. You'll never have trouble finding your Google
+          Photos again.
         </p>
-      </footer>
+        <div className="progress-bar-track">
+          <div
+            className="progress-bar-fill"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <p className="progress-label">
+          {uploaded} / {total} uploaded
+          {currentFile && (
+            <span className="current-file"> · {currentFile}</span>
+          )}
+        </p>
+
+        <div className="counts">
+          <Stat label="Uploaded" value={counts.uploaded ?? 0} color="green" />
+          <Stat
+            label="Pending"
+            value={counts.uninitialized ?? 0}
+            color="blue"
+          />
+          <Stat label="Failed" value={counts.failed ?? 0} color="red" />
+          <Stat label="Duplicates" value={counts.skipped ?? 0} color="gray" />
+        </div>
+
+        <button
+          className="btn-secondary btn-files"
+          onClick={handleToggleFiles}
+        >
+          Show uploaded files{" "}
+          <span className={`chevron ${showFiles ? "chevron-up" : ""}`}>
+            ›
+          </span>
+        </button>
+
+        {showFiles && (
+          <ul className="file-list">
+            {uploadedFiles.length === 0 && (
+              <li className="file-list-empty">No files uploaded yet.</li>
+            )}
+            {uploadedFiles.map((f) => (
+              <li key={f.id} className="file-list-item">
+                <span className="file-name">{f.name}</span>
+                <span className="file-meta">
+                  {(f.size / 1024 / 1024).toFixed(1)} MB
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </>
   );
 }

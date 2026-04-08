@@ -23,56 +23,31 @@ export default function LoginPage() {
 
   return (
     <>
-      <div className="container">
-        <h1>
-          <span className="h1-emoji">📸</span> Tag and Sync
-        </h1>
-        {error && (
-          <div className="error-banner">
-            ⚠️ {error}
-            <button className="error-dismiss" onClick={() => setError(null)}>
-              ✕
-            </button>
-          </div>
-        )}
-        <div className="card center">
-          <PhotoStack />
-          <span className="status-heading">
-            Manage Your Photos
-            <span className="status-heading-bar" />
-          </span>
-          <p className="tagline">
-            Syncs your photos from Google Drive to Google Photos — ✨ using AI
-            ✨ to add search-friendly labels along the way! Skips duplicates and
-            resumes after crashes. You'll never have trouble finding your Google
-            Photos again.
-          </p>
-          <button className="btn-google" onClick={handleLogin}>
-            <GoogleLogo />
-            Sign in with Google
+      {error && (
+        <div className="error-banner">
+          ⚠️ {error}
+          <button className="error-dismiss" onClick={() => setError(null)}>
+            ✕
           </button>
         </div>
-      </div>
-      <footer className="footer">
-        <p>
-          Made with care by{" "}
-          <a
-            href="https://www.mackenziekg.dev"
-            target="_blank"
-            rel="noreferrer"
-          >
-            mackenziekg.dev
-          </a>{" "}
-          in 2026. All rights reserved. See my{" "}
-          <a
-            href="https://sync.mackenziekg.dev/privacy.html"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Privacy Policy
-          </a>
+      )}
+      <div className="card center">
+        <PhotoStack />
+        <span className="status-heading">
+          Manage Your Photos
+          <span className="status-heading-bar" />
+        </span>
+        <p className="tagline">
+          Syncs your photos from Google Drive to Google Photos — ✨ using AI ✨
+          to add search-friendly labels along the way! Skips duplicates and
+          resumes after crashes. You'll never have trouble finding your Google
+          Photos again.
         </p>
-      </footer>
+        <button className="btn-google" onClick={handleLogin}>
+          <GoogleLogo />
+          Sign in with Google
+        </button>
+      </div>
     </>
   );
 }

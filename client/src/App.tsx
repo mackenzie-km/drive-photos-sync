@@ -18,6 +18,31 @@ export default function App() {
         <div className="spinner" />
       </div>
     );
-  if (!loggedIn) return <LoginPage />;
-  return <MainPage />;
+
+  return (
+    <>
+      <div className="container">
+        <h1>
+          <span className="h1-emoji">📸</span> Tag and Sync
+        </h1>
+        {loggedIn ? <MainPage /> : <LoginPage />}
+      </div>
+      <footer className="footer">
+        <p>
+          Made with care by{" "}
+          <a href="https://www.mackenziekg.dev" target="_blank" rel="noreferrer">
+            mackenziekg.dev
+          </a>{" "}
+          in 2026. All rights reserved. See my{" "}
+          <a
+            href="https://sync.mackenziekg.dev/privacy.html"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Privacy Policy
+          </a>
+        </p>
+      </footer>
+    </>
+  );
 }
