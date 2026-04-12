@@ -92,8 +92,7 @@ async function runSync(userId: string, runId: number, useAI: boolean) {
   await resetFailedFiles(userId);
 
   // Without AI, raise the limit since we're not incurring Gemini costs
-  // const MAX_UPLOADS_PER_USER = useAI ? 1000 : 10_000;
-  const MAX_UPLOADS_PER_USER = 10_000;
+  const MAX_UPLOADS_PER_USER = useAI ? 1_000 : 10_000;
 
   // ── Phase 1: discover ──────────────────────────────────────────────────────
   const preCounts = await getFileCounts(userId);
@@ -104,7 +103,8 @@ async function runSync(userId: string, runId: number, useAI: boolean) {
   const alreadyQueued =
     alreadyUploaded +
     (byPreStatus.uninitialized ?? 0) +
-    (byPreStatus.in_progress ?? 0);
+    (byPreStatus.in_progress ?? 0) +
+    (byPreStatus.skipped ?? 0);
   const discoverLimit = MAX_UPLOADS_PER_USER - alreadyUploaded;
 
   let discovered = 0;
