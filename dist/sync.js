@@ -53,31 +53,41 @@ async function runSync(userId, runId, useAI) {
     await (0, db_1.resetStuckFiles)(userId);
     // Give previously failed files another chance on each manual sync
     await (0, db_1.resetFailedFiles)(userId);
-    // Clear uninitialized files so discovery re-populates up to the current limit
-    await (0, db_1.clearUninitializedFiles)(userId);
     // Without AI, raise the limit since we're not incurring Gemini costs
     // const MAX_UPLOADS_PER_USER = useAI ? 1000 : 10_000;
     const MAX_UPLOADS_PER_USER = 10_000;
     // ── Phase 1: discover ──────────────────────────────────────────────────────
-    state.status = "discovering";
     const preCounts = await (0, db_1.getFileCounts)(userId);
-    const alreadyUploaded = Number(preCounts.find((r) => r.status === "uploaded")?.count ?? 0);
+    const byPreStatus = Object.fromEntries(preCounts.map((r) => [r.status, Number(r.count)]));
+    const alreadyUploaded = byPreStatus.uploaded ?? 0;
+    const alreadyQueued = alreadyUploaded +
+        (byPreStatus.uninitialized ?? 0) +
+        (byPreStatus.in_progress ?? 0);
     const discoverLimit = MAX_UPLOADS_PER_USER - alreadyUploaded;
-    console.log(`[sync:${userId}] Phase 1: discovering Drive photos (limit: ${discoverLimit})...`);
     let discovered = 0;
-    for await (const file of (0, drive_1.listDrivePhotos)(auth)) {
-        if (state.shouldAbort)
-            break;
-        if (discovered >= discoverLimit)
-            break;
-        await (0, db_1.upsertDriveFile)(file.id, userId, file.name, file.md5, file.mime_type, file.size, file.thumbnailLink);
-        discovered++;
-        if (discovered % 500 === 0)
-            console.log(`[sync:${userId}]   ${discovered} files found so far...`);
+    if (alreadyQueued >= MAX_UPLOADS_PER_USER) {
+        // DB already has enough files queued — skip rediscovery
+        console.log(`[sync:${userId}] Phase 1: skipped (${alreadyQueued} files already queued).`);
     }
-    console.log(`[sync:${userId}] Discovery complete: ${discovered} photos in Drive.`);
-    if (state.shouldAbort) {
-        return finishRun(userId, runId, "aborted", discovered, 0, 0, 0);
+    else {
+        // Clear uninitialized files so discovery re-populates up to the current limit
+        await (0, db_1.clearUninitializedFiles)(userId);
+        state.status = "discovering";
+        console.log(`[sync:${userId}] Phase 1: discovering Drive photos (limit: ${discoverLimit})...`);
+        for await (const file of (0, drive_1.listDrivePhotos)(auth)) {
+            if (state.shouldAbort)
+                break;
+            if (discovered >= discoverLimit)
+                break;
+            await (0, db_1.upsertDriveFile)(file.id, userId, file.name, file.md5, file.mime_type, file.size, file.thumbnailLink);
+            discovered++;
+            if (discovered % 500 === 0)
+                console.log(`[sync:${userId}]   ${discovered} files found so far...`);
+        }
+        console.log(`[sync:${userId}] Discovery complete: ${discovered} photos in Drive.`);
+        if (state.shouldAbort) {
+            return finishRun(userId, runId, "aborted", discovered, 0, 0, 0);
+        }
     }
     // ── Phase 2: upload ────────────────────────────────────────────────────────
     state.status = "uploading";
