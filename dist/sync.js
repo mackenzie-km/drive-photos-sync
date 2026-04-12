@@ -54,7 +54,8 @@ async function runSync(userId, runId, useAI) {
     // Give previously failed files another chance on each manual sync
     await (0, db_1.resetFailedFiles)(userId);
     // Without AI, raise the limit since we're not incurring Gemini costs
-    const MAX_UPLOADS_PER_USER = useAI ? 1_000 : 10_000;
+    // const MAX_UPLOADS_PER_USER = useAI ? 1_000 : 10_000;
+    const MAX_UPLOADS_PER_USER = 10_000;
     // ── Phase 1: discover ──────────────────────────────────────────────────────
     const preCounts = await (0, db_1.getFileCounts)(userId);
     const byPreStatus = Object.fromEntries(preCounts.map((r) => [r.status, Number(r.count)]));
