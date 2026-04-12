@@ -144,10 +144,10 @@ export default function MainPage() {
       )}
       {!syncStatus?.latestRun?.error &&
         syncStatus?.status === "done" &&
-        (syncStatus?.latestRun?.failed ?? 0) > 0 && (
+        (syncStatus?.fileCounts?.failed ?? 0) > 0 && (
           <div className="error-banner">
-            ⚠️ {syncStatus.latestRun!.failed} file
-            {syncStatus.latestRun!.failed === 1 ? "" : "s"} failed to upload.
+            ⚠️ {syncStatus.fileCounts!.failed} file
+            {syncStatus.fileCounts!.failed === 1 ? "" : "s"} failed to upload.
             Start a new sync to retry.
           </div>
         )}
