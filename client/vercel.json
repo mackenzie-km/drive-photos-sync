@@ -5,6 +5,10 @@
       "destination": "/api/auth/callback"
     },
     {
+      "source": "/privacy",
+      "destination": "/privacy.html"
+    },
+    {
       "source": "/auth/:path*",
       "destination": "https://drive-photos-sync.onrender.com/auth/:path*"
     },
