@@ -208,16 +208,18 @@ async function runSync(userId: string, runId: number, useAI: boolean) {
         uploaded++;
         console.log(`[sync:${userId}]   ✓ ${file.name} (${uploaded} uploaded)`);
       } catch (err: any) {
+        const reason = err.response?.data?.error?.errors?.[0]?.reason;
+        const detail = reason ? `${err.message} (reason: ${reason})` : err.message ?? "unknown error";
         await updateFileStatus(
           "failed",
           null,
-          err.message ?? "unknown error",
+          detail,
           1,
           file.id,
           userId,
         );
         failed++;
-        console.error(`[sync:${userId}]   ✗ ${file.name}: ${err.message}`);
+        console.log(`[sync:${userId}]   ✗ ${file.name}: ${detail}`);
       }
     }
   }
