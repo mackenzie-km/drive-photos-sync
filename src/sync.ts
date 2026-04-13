@@ -210,6 +210,11 @@ async function runSync(userId: string, runId: number, useAI: boolean) {
       } catch (err: any) {
         const reason = err.response?.data?.error?.errors?.[0]?.reason;
         const detail = reason ? `${err.message} (reason: ${reason})` : err.message ?? "unknown error";
+        if (err.response?.data) {
+          console.log(`[sync:${userId}]   ✗ ${file.name}: ${detail} | response body: ${JSON.stringify(err.response.data)}`);
+        } else {
+          console.log(`[sync:${userId}]   ✗ ${file.name}: ${detail}`);
+        }
         await updateFileStatus(
           "failed",
           null,
@@ -219,7 +224,6 @@ async function runSync(userId: string, runId: number, useAI: boolean) {
           userId,
         );
         failed++;
-        console.log(`[sync:${userId}]   ✗ ${file.name}: ${detail}`);
       }
     }
   }

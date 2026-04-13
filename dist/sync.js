@@ -133,9 +133,14 @@ async function runSync(userId, runId, useAI) {
             catch (err) {
                 const reason = err.response?.data?.error?.errors?.[0]?.reason;
                 const detail = reason ? `${err.message} (reason: ${reason})` : err.message ?? "unknown error";
+                if (err.response?.data) {
+                    console.log(`[sync:${userId}]   ✗ ${file.name}: ${detail} | response body: ${JSON.stringify(err.response.data)}`);
+                }
+                else {
+                    console.log(`[sync:${userId}]   ✗ ${file.name}: ${detail}`);
+                }
                 await (0, db_1.updateFileStatus)("failed", null, detail, 1, file.id, userId);
                 failed++;
-                console.log(`[sync:${userId}]   ✗ ${file.name}: ${detail}`);
             }
         }
     }
