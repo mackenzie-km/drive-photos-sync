@@ -24,7 +24,6 @@ export interface DrivePhoto {
   md5: string | null;
   mime_type: string;
   size: number | null;
-  thumbnailLink: string | null;
 }
 
 // Async generator — yields one file at a time, handles pagination internally.
@@ -38,7 +37,7 @@ export async function* listDrivePhotos(
     const res = await drive.files.list({
       q: `(${MIME_QUERY}) and trashed = false`,
       fields:
-        "nextPageToken, files(id, name, md5Checksum, mimeType, size, thumbnailLink)",
+        "nextPageToken, files(id, name, md5Checksum, mimeType, size)",
       pageSize: 1000,
       pageToken,
     });
@@ -50,7 +49,6 @@ export async function* listDrivePhotos(
         md5: file.md5Checksum ?? null,
         mime_type: file.mimeType!,
         size: file.size ? parseInt(file.size) : null,
-        thumbnailLink: file.thumbnailLink ?? null,
       };
     }
 
@@ -58,18 +56,16 @@ export async function* listDrivePhotos(
   } while (pageToken);
 }
 
-// Returns a readable stream of the file's bytes — streamed directly to Photos
-// without buffering the whole file in memory.
-export async function streamDriveFile(
+// Downloads a file's bytes into a Buffer. Used when the file is needed for
+// both Gemini analysis and Photos upload in the same sync step.
+export async function downloadDriveFile(
   auth: OAuth2Client,
   fileId: string,
-): Promise<NodeJS.ReadableStream> {
+): Promise<Buffer> {
   const drive = google.drive({ version: "v3", auth });
   const res = await drive.files.get(
     { fileId, alt: "media" },
-    { responseType: "stream" },
+    { responseType: "arraybuffer" },
   );
-
-  // "Unknown" needed due to imprecision of googleapi's streaming response types
-  return res.data as unknown as NodeJS.ReadableStream;
+  return Buffer.from(res.data as ArrayBuffer);
 }

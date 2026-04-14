@@ -1,6 +1,7 @@
 import { withRetry } from "./retry";
 import { getAuthClient } from "./auth";
-import { listDrivePhotos, streamDriveFile } from "./drive";
+import { Readable } from "stream";
+import { listDrivePhotos, downloadDriveFile } from "./drive";
 import { generatePhotoDescription } from "./gemini";
 import { uploadPhoto } from "./photos";
 import {
@@ -132,7 +133,6 @@ async function runSync(userId: string, runId: number, useAI: boolean) {
         file.md5,
         file.mime_type,
         file.size,
-        file.thumbnailLink,
       );
       discovered++;
       if (discovered % 500 === 0)
@@ -194,15 +194,14 @@ async function runSync(userId: string, runId: number, useAI: boolean) {
 
         state.currentFile = file.name;
         await markFileInProgress(file.id, userId);
-        const description =
-          useAI && file.thumbnail_link
-            ? await withRetry(() =>
-                generatePhotoDescription(file.thumbnail_link!),
-              )
-            : undefined;
-        const stream = await streamDriveFile(auth, file.id);
+        const fileBuffer = await downloadDriveFile(auth, file.id);
+        const description = useAI
+          ? await withRetry(() =>
+              generatePhotoDescription(fileBuffer, file.mime_type),
+            ).catch(() => undefined)
+          : undefined;
         const mediaId = await withRetry(() =>
-          uploadPhoto(auth, stream, file.name, file.mime_type, description),
+          uploadPhoto(auth, Readable.from(fileBuffer), file.name, file.mime_type, description),
         );
         await updateFileStatus("uploaded", mediaId, null, 0, file.id, userId);
         uploaded++;
@@ -243,9 +242,6 @@ async function runSync(userId: string, runId: number, useAI: boolean) {
   );
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function finishRun(
   userId: string,

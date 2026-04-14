@@ -41,7 +41,6 @@ async function initDb() {
       md5               TEXT,
       mime_type         TEXT NOT NULL,
       size              BIGINT,
-      thumbnail_link    TEXT,
       status            TEXT NOT NULL DEFAULT 'uninitialized',
       photos_media_id   TEXT,
       error             TEXT,
@@ -84,16 +83,15 @@ async function getTokens(userId) {
 }
 // If the file (id + user_id) already exists in DB and it's still uninitialized,
 // use the incoming metadata to update the existing row.
-async function upsertDriveFile(id, userId, name, md5, mimeType, size, thumbnailLink) {
-    await (0, exports.query)(`INSERT INTO drive_files (id, user_id, name, md5, mime_type, size, thumbnail_link)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+async function upsertDriveFile(id, userId, name, md5, mimeType, size) {
+    await (0, exports.query)(`INSERT INTO drive_files (id, user_id, name, md5, mime_type, size)
+     VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (id, user_id) DO UPDATE SET
-       name           = $3,
-       md5            = $4,
-       mime_type      = $5,
-       size           = $6,
-       thumbnail_link = $7
-     WHERE drive_files.status = 'uninitialized'`, [id, userId, name, md5, mimeType, size, thumbnailLink]);
+       name      = $3,
+       md5       = $4,
+       mime_type = $5,
+       size      = $6
+     WHERE drive_files.status = 'uninitialized'`, [id, userId, name, md5, mimeType, size]);
 }
 // Returns the row if a file with the same md5 is already uploaded for this user, null otherwise
 async function getMd5Uploaded(userId, md5) {

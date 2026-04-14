@@ -10,7 +10,7 @@ Why search through drive, hunting around for your old photos? This web app
 - **Backend:** Node.js, TypeScript, Express
 - **Database:** PostgreSQL
 - **Auth:** Google OAuth 2.0
-- **AI:** Google Gemini (generates photo descriptions from thumbnails)
+- **AI:** Google Gemini (generates photo descriptions from photo content)
 - **Deployment:** Render (backend) · Vercel (frontend)
 
 ## Architecture
@@ -21,8 +21,8 @@ Why search through drive, hunting around for your old photos? This web app
 
 1. You authenticate with Google via OAuth
 2. The app discovers all image files in your Drive
-3. Each file's thumbnail is sent to Gemini to generate a descriptive caption
-4. The file is streamed directly from Drive to Google Photos with the caption attached (no disk buffering)
+3. Each file is downloaded and optionally sent to Gemini to generate a descriptive caption
+4. The file is uploaded to Google Photos with the caption attached
 5. Progress is tracked in Postgres — syncs are resumable and idempotent
 
 ## Local setup
@@ -102,7 +102,7 @@ npm run dev
 | ------ | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET`  | `/sync/status` | Tells you if you're syncing or not, and which file is currently being processed                                                                                                                                                                                   |
 | `GET`  | `/sync/files`  | Returns list of already uploaded files                                                                                                                                                                                                                            |
-| `POST` | `/sync/start`  | Kicks off the sync process. Accepts `useAI` (default `true`). Discovers photos in Drive in batches by userId, updates local sync state, saves records to DB, optionally passes thumbnails to Gemini for descriptions, then uploads to Google Photos one at a time |
+| `POST` | `/sync/start`  | Kicks off the sync process. Accepts `useAI` (default `true`). Discovers photos in Drive in batches by userId, updates local sync state, saves records to DB, optionally sends photos to Gemini for descriptions, then uploads to Google Photos one at a time |
 | `POST` | `/sync/abort`  | Gracefully stops sync: immediately clears local memory and sets a flag so the loop stops after the current file finishes                                                                                                                                          |
 
 ### Health
@@ -132,7 +132,6 @@ npm run dev
 | `md5`               | `TEXT`    | Nullable; used for dedup                                                |
 | `mime_type`         | `TEXT`    |                                                                         |
 | `size`              | `BIGINT`  | Nullable                                                                |
-| `thumbnail_link`    | `TEXT`    | Nullable; passed to Gemini for description generation                   |
 | `status`            | `TEXT`    | `uninitialized` \| `in_progress` \| `uploaded` \| `failed` \| `skipped` |
 | `photos_media_id`   | `TEXT`    | Nullable; set after successful upload                                   |
 | `error`             | `TEXT`    | Nullable; last error message                                            |

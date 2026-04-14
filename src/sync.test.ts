@@ -4,7 +4,7 @@ jest.mock("./auth", () => ({
 
 jest.mock("./drive", () => ({
   listDrivePhotos: jest.fn(),
-  streamDriveFile: jest.fn().mockResolvedValue({}),
+  downloadDriveFile: jest.fn().mockResolvedValue(Buffer.from("fake-image-data")),
 }));
 
 jest.mock("./gemini", () => ({
@@ -32,7 +32,7 @@ jest.mock("./db", () => ({
 import { startSync, requestAbort, getSyncState } from "./sync";
 import { generatePhotoDescription } from "./gemini";
 import { updateSyncRun, updateFileStatus, getMd5Uploaded } from "./db";
-import { listDrivePhotos, streamDriveFile } from "./drive";
+import { listDrivePhotos } from "./drive";
 import { getUninitializedFiles } from "./db";
 
 const mockGeneratePhotoDescription = generatePhotoDescription as jest.Mock;
@@ -51,21 +51,10 @@ async function waitFor(condition: () => boolean, timeoutMs = 3000) {
   }
 }
 
-// A file with a thumbnail_link
-const FILE_WITH_THUMB = {
+const FILE = {
   id: "file-1",
   name: "photo.jpg",
   mime_type: "image/jpeg",
-  thumbnail_link: "https://example.com/thumb.jpg",
-  retry_count: 0,
-};
-
-// A file without a thumbnail_link
-const FILE_WITHOUT_THUMB = {
-  id: "file-2",
-  name: "photo.jpg",
-  mime_type: "image/jpeg",
-  thumbnail_link: null,
   retry_count: 0,
 };
 
@@ -89,7 +78,7 @@ describe("startSync — MD5 dedup", () => {
     const DUPE_MD5 = "406c42808df1d62ef77796cac292e827";
 
     mockGetUninitializedFiles
-      .mockResolvedValueOnce([{ ...FILE_WITH_THUMB, md5: DUPE_MD5 }])
+      .mockResolvedValueOnce([{ ...FILE, md5: DUPE_MD5 }])
       .mockResolvedValue([]);
 
     // Simulate an already-uploaded file with the same md5
@@ -103,14 +92,14 @@ describe("startSync — MD5 dedup", () => {
       null,
       "duplicate md5",
       0,
-      FILE_WITH_THUMB.id,
+      FILE.id,
       "user-dedup-1",
     );
   });
 
   it("does not skip a file when no other file with the same md5 is uploaded", async () => {
     mockGetUninitializedFiles
-      .mockResolvedValueOnce([FILE_WITH_THUMB])
+      .mockResolvedValueOnce([FILE])
       .mockResolvedValue([]);
 
     mockGetMd5Uploaded.mockResolvedValue(null);
@@ -133,7 +122,6 @@ describe("startSync — Gemini integration", () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    // Default: discovery yields one file then stops (matches the TODO break in sync.ts)
     mockListDrivePhotos.mockImplementation(async function* () {
       yield {
         id: "file-1",
@@ -141,47 +129,34 @@ describe("startSync — Gemini integration", () => {
         md5: "abc",
         mime_type: "image/jpeg",
         size: 1024,
-        thumbnailLink: "https://example.com/thumb.jpg",
       };
     });
   });
 
-  it("calls generatePhotoDescription when the file has a thumbnail_link", async () => {
+  it("calls generatePhotoDescription with buffer and mimeType when useAI is true", async () => {
     mockGetUninitializedFiles
-      .mockResolvedValueOnce([FILE_WITH_THUMB])
-      .mockResolvedValue([]); // empty batch ends the upload loop
+      .mockResolvedValueOnce([FILE])
+      .mockResolvedValue([]);
 
     mockGeneratePhotoDescription.mockResolvedValue(
       "sunset, beach, ocean, couple, silhouette, golden hour, romantic, waves, sand, travel",
     );
 
     await startSync("user-gemini-1", true);
-
     await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
 
     expect(mockGeneratePhotoDescription).toHaveBeenCalledWith(
-      "https://example.com/thumb.jpg",
+      expect.any(Buffer),
+      FILE.mime_type,
     );
   });
 
-  it("skips generatePhotoDescription when the file has no thumbnail_link", async () => {
-    mockListDrivePhotos.mockImplementation(async function* () {
-      yield {
-        id: "file-2",
-        name: "photo.jpg",
-        md5: "abc",
-        mime_type: "image/jpeg",
-        size: 1024,
-        thumbnailLink: null,
-      };
-    });
-
+  it("skips generatePhotoDescription when useAI is false", async () => {
     mockGetUninitializedFiles
-      .mockResolvedValueOnce([FILE_WITHOUT_THUMB])
+      .mockResolvedValueOnce([FILE])
       .mockResolvedValue([]);
 
-    await startSync("user-gemini-2", true);
-
+    await startSync("user-gemini-2", false);
     await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
 
     expect(mockGeneratePhotoDescription).not.toHaveBeenCalled();

@@ -27,7 +27,7 @@ router.get("/auth/callback", async (req, res) => {
     const code = req.query.code;
     const frontendUrl = process.env.FRONTEND_URL ?? "http://localhost:5173";
     if (!code) {
-        res.send(`<script>location.href=${JSON.stringify(`${frontendUrl}/?auth_error=access_denied`)}</script>`);
+        res.redirect(`${frontendUrl}/?auth_error=access_denied`);
         return;
     }
     try {
@@ -36,12 +36,12 @@ router.get("/auth/callback", async (req, res) => {
         req.session.save((err) => {
             if (err)
                 console.error("[auth] session save error:", err);
-            res.send(`<script>location.href=${JSON.stringify(frontendUrl)}</script>`);
+            res.redirect(frontendUrl);
         });
     }
     catch (err) {
         console.error("[auth] callback error:", err);
-        res.send(`<script>location.href=${JSON.stringify(`${frontendUrl}/?auth_error=1`)}</script>`);
+        res.redirect(`${frontendUrl}/?auth_error=1`);
     }
 });
 router.get("/auth/me", (req, res) => {

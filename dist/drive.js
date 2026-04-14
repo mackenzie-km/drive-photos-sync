@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.listDrivePhotos = listDrivePhotos;
-exports.streamDriveFile = streamDriveFile;
+exports.downloadDriveFile = downloadDriveFile;
 const googleapis_1 = require("googleapis");
 // All image types Drive can store
 const MIME_QUERY = [
@@ -26,7 +26,7 @@ async function* listDrivePhotos(auth) {
     do {
         const res = await drive.files.list({
             q: `(${MIME_QUERY}) and trashed = false`,
-            fields: "nextPageToken, files(id, name, md5Checksum, mimeType, size, thumbnailLink)",
+            fields: "nextPageToken, files(id, name, md5Checksum, mimeType, size)",
             pageSize: 1000,
             pageToken,
         });
@@ -37,17 +37,15 @@ async function* listDrivePhotos(auth) {
                 md5: file.md5Checksum ?? null,
                 mime_type: file.mimeType,
                 size: file.size ? parseInt(file.size) : null,
-                thumbnailLink: file.thumbnailLink ?? null,
             };
         }
         pageToken = res.data.nextPageToken ?? undefined;
     } while (pageToken);
 }
-// Returns a readable stream of the file's bytes — streamed directly to Photos
-// without buffering the whole file in memory.
-async function streamDriveFile(auth, fileId) {
+// Downloads a file's bytes into a Buffer. Used when the file is needed for
+// both Gemini analysis and Photos upload in the same sync step.
+async function downloadDriveFile(auth, fileId) {
     const drive = googleapis_1.google.drive({ version: "v3", auth });
-    const res = await drive.files.get({ fileId, alt: "media" }, { responseType: "stream" });
-    // "Unknown" needed due to imprecision of googleapi's streaming response types
-    return res.data;
+    const res = await drive.files.get({ fileId, alt: "media" }, { responseType: "arraybuffer" });
+    return Buffer.from(res.data);
 }

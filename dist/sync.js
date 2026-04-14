@@ -5,6 +5,7 @@ exports.requestAbort = requestAbort;
 exports.startSync = startSync;
 const retry_1 = require("./retry");
 const auth_1 = require("./auth");
+const stream_1 = require("stream");
 const drive_1 = require("./drive");
 const gemini_1 = require("./gemini");
 const photos_1 = require("./photos");
@@ -79,7 +80,7 @@ async function runSync(userId, runId, useAI) {
                 break;
             if (discovered >= discoverLimit)
                 break;
-            await (0, db_1.upsertDriveFile)(file.id, userId, file.name, file.md5, file.mime_type, file.size, file.thumbnailLink);
+            await (0, db_1.upsertDriveFile)(file.id, userId, file.name, file.md5, file.mime_type, file.size);
             discovered++;
             if (discovered % 500 === 0)
                 console.log(`[sync:${userId}]   ${discovered} files found so far...`);
@@ -121,11 +122,11 @@ async function runSync(userId, runId, useAI) {
                 }
                 state.currentFile = file.name;
                 await (0, db_1.markFileInProgress)(file.id, userId);
-                const description = useAI && file.thumbnail_link
-                    ? await (0, retry_1.withRetry)(() => (0, gemini_1.generatePhotoDescription)(file.thumbnail_link))
+                const fileBuffer = await (0, drive_1.downloadDriveFile)(auth, file.id);
+                const description = useAI
+                    ? await (0, retry_1.withRetry)(() => (0, gemini_1.generatePhotoDescription)(fileBuffer, file.mime_type)).catch(() => undefined)
                     : undefined;
-                const stream = await (0, drive_1.streamDriveFile)(auth, file.id);
-                const mediaId = await (0, retry_1.withRetry)(() => (0, photos_1.uploadPhoto)(auth, stream, file.name, file.mime_type, description));
+                const mediaId = await (0, retry_1.withRetry)(() => (0, photos_1.uploadPhoto)(auth, stream_1.Readable.from(fileBuffer), file.name, file.mime_type, description));
                 await (0, db_1.updateFileStatus)("uploaded", mediaId, null, 0, file.id, userId);
                 uploaded++;
                 console.log(`[sync:${userId}]   ✓ ${file.name} (${uploaded} uploaded)`);
@@ -147,9 +148,6 @@ async function runSync(userId, runId, useAI) {
     state.currentFile = null;
     finishRun(userId, runId, state.shouldAbort ? "aborted" : "done", discovered, uploaded, skipped, failed);
     console.log(`[sync:${userId}] Finished. uploaded=${uploaded} skipped=${skipped} failed=${failed}`);
-}
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 function finishRun(userId, runId, status, total, uploaded, skipped, failed) {
     const state = userSyncState.get(userId);
