@@ -18,7 +18,7 @@
     },
     {
       "source": "/privacy",
-      "destination": "/privacy.html"
+      "destination": "/api/privacy"
     },
     {
       "source": "/auth/:path*",
