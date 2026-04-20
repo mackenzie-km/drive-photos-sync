@@ -1,15 +1,4 @@
 {
-  "headers": [
-    {
-      "source": "/privacy",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=3600"
-        }
-      ]
-    }
-  ],
   "redirects": [
     {
       "source": "/privacy.html",
@@ -26,6 +15,10 @@
     {
       "source": "/auth/callback",
       "destination": "/api/auth/callback"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/api/privacy"
     },
     {
       "source": "/auth/:path*",

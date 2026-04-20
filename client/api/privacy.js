@@ -1,4 +1,4 @@
-<!doctype html>
+const html = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -118,4 +118,10 @@
       <a href="mailto:mackenzie.gonzales.k@gmail.com">mackenzie.gonzales.k@gmail.com</a>.
     </p>
   </body>
-</html>
+</html>`;
+
+export default function handler(req, res) {
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  res.send(html);
+}
