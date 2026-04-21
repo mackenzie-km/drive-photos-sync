@@ -24,7 +24,7 @@ const html = `<!doctype html>
   </head>
   <body>
     <h1>Tag and Sync — Privacy Policy</h1>
-    <p class="updated">Last updated: April 20, 2026</p>
+    <p class="updated">Last updated: April 21, 2026</p>
 
     <h2>What is Tag and Sync?</h2>
     <p>
@@ -68,6 +68,39 @@ const html = `<!doctype html>
       disabled at any time from the main page. We do not store the generated
       descriptions beyond what Google Photos retains as part of the upload.
     </p>
+
+    <h2>How we protect your data</h2>
+    <p>We take the following steps to protect sensitive data:</p>
+    <ul>
+      <li>
+        <strong>Encryption in transit</strong> — all communication between your
+        browser, our servers, and Google APIs uses HTTPS/TLS. OAuth tokens are
+        never transmitted over unencrypted connections.
+      </li>
+      <li>
+        <strong>Encryption at rest</strong> — OAuth tokens and session data are
+        stored in a managed PostgreSQL database (Neon) with encryption at rest
+        enabled by default on all plans.
+      </li>
+      <li>
+        <strong>Access controls</strong> — the database requires authenticated,
+        TLS-encrypted connections. Database credentials are stored as environment
+        variables and never exposed in source code or logs.
+      </li>
+      <li>
+        <strong>Minimal scope</strong> — we request only the Drive, Photos, and
+        identity scopes required for the sync to function. We request
+        <code>drive.readonly</code> (read-only access) because the app needs to
+        read photos you have previously stored in Drive — photos not created by
+        this app — which the more-restricted <code>drive.file</code> scope does
+        not cover.
+      </li>
+      <li>
+        <strong>Session security</strong> — session cookies are marked
+        <code>HttpOnly</code> (not accessible to JavaScript) and
+        <code>Secure</code> (HTTPS only) in production, with a 7-day expiry.
+      </li>
+    </ul>
 
     <h2>What we do not do</h2>
     <ul>
