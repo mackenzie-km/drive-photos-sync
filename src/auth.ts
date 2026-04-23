@@ -3,7 +3,7 @@ import { OAuth2Client } from "google-auth-library";
 import { saveTokens, getTokens } from "./db";
 
 const SCOPES = [
-  "https://www.googleapis.com/auth/drive.readonly",
+  "https://www.googleapis.com/auth/drive.file",
   "https://www.googleapis.com/auth/photoslibrary.appendonly",
   "https://www.googleapis.com/auth/userinfo.profile",
 ];

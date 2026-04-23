@@ -20,10 +20,11 @@ Why search through drive, hunting around for your old photos? This web app
 ## How it works
 
 1. You authenticate with Google via OAuth
-2. The app discovers all image files in your Drive
-3. Each file is downloaded and optionally sent to Gemini to generate a descriptive caption
-4. The file is uploaded to Google Photos with the caption attached
-5. Progress is tracked in Postgres — syncs are resumable and idempotent
+2. You use the Google Drive Picker to select a specific folder to sync
+3. The app discovers all image files in that folder (up to 5,000 with AI, unlimited without)
+4. Each file is downloaded and optionally sent to Gemini to generate a descriptive caption
+5. The file is uploaded to Google Photos with the caption attached
+6. Progress is tracked in Postgres — syncs are resumable and idempotent
 
 ## Local setup
 
@@ -52,10 +53,10 @@ createdb drive_photos_sync
 4. Add `http://localhost:3000/auth/callback` as an authorized redirect URI
 5. Copy your Client ID and Client Secret
 6. Add test/localdev users to OAuth Consent Screen Audience
-7. Make sure Google Drive & Google Photos are set up as enabled APIs for this project.
+7. Make sure Google Drive API, Google Photos Library API, and Google Picker API are enabled for this project.
 8. Add Drive & Photos to your OAuth Scopes:
 
-- https://www.googleapis.com/auth/drive.readonly
+- https://www.googleapis.com/auth/drive.file
 - https://www.googleapis.com/auth/photoslibrary.appendonly
 
 ### Environment
@@ -73,6 +74,7 @@ OAUTH_REDIRECT_URI=http://localhost:3000/auth/callback
 DATABASE_URL=postgres://localhost/drive_photos_sync
 SESSION_SECRET=<generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))">
 GEMINI_API_KEY=...
+GOOGLE_API_KEY=...
 PORT=3000
 ```
 
@@ -102,7 +104,7 @@ npm run dev
 | ------ | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET`  | `/sync/status` | Tells you if you're syncing or not, and which file is currently being processed                                                                                                                                                                                   |
 | `GET`  | `/sync/files`  | Returns list of already uploaded files                                                                                                                                                                                                                            |
-| `POST` | `/sync/start`  | Kicks off the sync process. Accepts `useAI` (default `true`). Discovers photos in Drive in batches by userId, updates local sync state, saves records to DB, optionally sends photos to Gemini for descriptions, then uploads to Google Photos one at a time |
+| `POST` | `/sync/start`  | Kicks off the sync process. Requires `folderId` (from the Picker) and accepts `useAI` (default `true`). Discovers photos in the selected folder, saves records to DB, optionally sends photos to Gemini for descriptions, then uploads to Google Photos one at a time. Capped at 5,000 files per sync when AI is enabled. |
 | `POST` | `/sync/abort`  | Gracefully stops sync: immediately clears local memory and sets a flag so the loop stops after the current file finishes                                                                                                                                          |
 
 ### Health
@@ -164,7 +166,9 @@ uninitialized → in_progress → uploaded
                             → skipped (duplicate md5)
 ```
 
-Files stuck in `in_progress` (e.g. from a crash) are reset to `uninitialized` at the start of each sync run.
+At the start of each sync run:
+- Files stuck in `in_progress` (e.g. from a crash) are reset to `uninitialized`
+- All `failed` and `uninitialized` files are deleted so the selected folder is re-discovered fresh — this prevents failures from a previous folder bleeding into the new sync
 
 ## npm scripts
 
@@ -190,6 +194,7 @@ OAUTH_REDIRECT_URI=https://your-domain.com/auth/callback  # must match Google Cl
 DATABASE_URL        # provided automatically by Render Postgres addon
 SESSION_SECRET
 GEMINI_API_KEY
+GOOGLE_API_KEY
 FRONTEND_URL=https://your-domain.com
 NODE_ENV=production
 ```

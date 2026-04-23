@@ -8,6 +8,7 @@ export default defineConfig({
     proxy: {
       '/auth': 'http://localhost:3000',
       '/sync': 'http://localhost:3000',
+      '/picker': 'http://localhost:3000',
     },
   },
   test: {

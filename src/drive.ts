@@ -29,13 +29,14 @@ export interface DrivePhoto {
 // Async generator — yields one file at a time, handles pagination internally.
 export async function* listDrivePhotos(
   auth: OAuth2Client,
+  folderId: string,
 ): AsyncGenerator<DrivePhoto> {
   const drive = google.drive({ version: "v3", auth });
   let pageToken: string | undefined;
 
   do {
     const res = await drive.files.list({
-      q: `(${MIME_QUERY}) and trashed = false`,
+      q: `'${folderId}' in parents and (${MIME_QUERY}) and trashed = false`,
       fields:
         "nextPageToken, files(id, name, md5Checksum, mimeType, size)",
       pageSize: 1000,

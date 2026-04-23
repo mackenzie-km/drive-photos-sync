@@ -42,7 +42,7 @@ describe("handleCallback", () => {
           expiry_date: 9999999999,
           // Only two of the three required scopes granted:
           scope:
-            "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.profile",
+            "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile",
         },
       }),
       setCredentials: jest.fn(),
@@ -64,7 +64,7 @@ describe("handleCallback", () => {
           refresh_token: "refresh-token",
           expiry_date: 9999999999,
           scope: [
-            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/drive.file",
             "https://www.googleapis.com/auth/photoslibrary", // wrong scope — missing .appendonly
             "https://www.googleapis.com/auth/userinfo.profile",
           ].join(" "),
@@ -106,7 +106,7 @@ describe("handleCallback", () => {
           refresh_token: "refresh-token",
           expiry_date: 9999999999,
           scope: [
-            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/drive.file",
             "https://www.googleapis.com/auth/photoslibrary.appendonly",
             "https://www.googleapis.com/auth/userinfo.profile",
           ].join(" "),

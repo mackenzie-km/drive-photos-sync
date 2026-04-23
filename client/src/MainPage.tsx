@@ -56,6 +56,8 @@ export default function MainPage() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [useAI, setUseAI] = useState(true);
+  const [folderId, setFolderId] = useState<string | null>(null);
+  const [folderName, setFolderName] = useState<string | null>(null);
 
   useEffect(() => {
     const poll = () => {
@@ -94,7 +96,7 @@ export default function MainPage() {
       const res = await fetch("/sync/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ useAI }),
+        body: JSON.stringify({ useAI, folderId }),
       });
       if (res.ok) {
         setSyncStatus((prev) =>
@@ -119,6 +121,36 @@ export default function MainPage() {
       setError(
         "There was an issue completing this sync. Please try again shortly.",
       );
+    }
+  }
+
+  async function openPicker() {
+    try {
+      const res = await fetch("/picker/config");
+      if (!res.ok) throw new Error("Not authenticated");
+      const { access_token, api_key } = await res.json();
+
+      (window as any).gapi.load("picker", () => {
+        const gp = (window as any).google.picker;
+        const folderView = new gp.DocsView()
+          .setIncludeFolders(true)
+          .setSelectFolderEnabled(true)
+          .setMimeTypes("application/vnd.google-apps.folder");
+        const picker = new gp.PickerBuilder()
+          .addView(folderView)
+          .setOAuthToken(access_token)
+          .setDeveloperKey(api_key)
+          .setCallback((data: any) => {
+            if (data.action === gp.Action.PICKED) {
+              setFolderId(data.docs[0].id);
+              setFolderName(data.docs[0].name);
+            }
+          })
+          .build();
+        picker.setVisible(true);
+      });
+    } catch (e: any) {
+      setError("Could not open picker: " + e.message);
     }
   }
 
@@ -167,13 +199,24 @@ export default function MainPage() {
               <span className="status-heading-bar" />
             </span>
           </div>
-          {IS_RUNNING(status) ? (
-            <button className="btn-secondary" onClick={handleAbort}>
-              ⏸ Abort
-            </button>
-          ) : (
-            <button onClick={handleStartSync}>▶ Start Sync</button>
-          )}
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            {IS_RUNNING(status) ? (
+              <button className="btn-secondary" onClick={handleAbort}>
+                ⏸ Abort
+              </button>
+            ) : (
+              <>
+                <button className="btn-green" onClick={openPicker}>
+                  {folderName
+                    ? `Selected: ${folderName.length > 10 ? folderName.slice(0, 15) + "…" : folderName}`
+                    : "Select a Folder"}
+                </button>
+                <button disabled={!folderId} onClick={handleStartSync}>
+                  ▶ Start Sync
+                </button>
+              </>
+            )}
+          </div>
         </div>
         {
           <label className="ai-toggle">
@@ -187,10 +230,10 @@ export default function MainPage() {
           </label>
         }
         <p className="tagline">
-          Syncs your photos from Google Drive to Google Photos ✨ using AI ✨
-          to add search-friendly labels along the way! Skips duplicates and
-          resumes after crashes. You'll never have trouble finding your Google
-          Photos again.
+          Syncs your photos from Google Drive to Google Photos ✨ using AI ✨ to
+          add search-friendly labels along the way! Skips duplicates and resumes
+          after crashes. You'll never have trouble finding your Google Photos
+          again.
         </p>
         <div className="progress-bar-track">
           <div
@@ -216,14 +259,9 @@ export default function MainPage() {
           <Stat label="Duplicates" value={counts.skipped ?? 0} color="gray" />
         </div>
 
-        <button
-          className="btn-secondary btn-files"
-          onClick={handleToggleFiles}
-        >
+        <button className="btn-secondary btn-files" onClick={handleToggleFiles}>
           Show uploaded files{" "}
-          <span className={`chevron ${showFiles ? "chevron-up" : ""}`}>
-            ›
-          </span>
+          <span className={`chevron ${showFiles ? "chevron-up" : ""}`}>›</span>
         </button>
 
         {showFiles && (

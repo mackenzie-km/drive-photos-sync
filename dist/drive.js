@@ -20,12 +20,12 @@ const MIME_QUERY = [
     .map((m) => `mimeType = '${m}'`)
     .join(" or ");
 // Async generator — yields one file at a time, handles pagination internally.
-async function* listDrivePhotos(auth) {
+async function* listDrivePhotos(auth, folderId) {
     const drive = googleapis_1.google.drive({ version: "v3", auth });
     let pageToken;
     do {
         const res = await drive.files.list({
-            q: `(${MIME_QUERY}) and trashed = false`,
+            q: `'${folderId}' in parents and (${MIME_QUERY}) and trashed = false`,
             fields: "nextPageToken, files(id, name, md5Checksum, mimeType, size)",
             pageSize: 1000,
             pageToken,

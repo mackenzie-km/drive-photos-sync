@@ -9,7 +9,7 @@ exports.getMd5Uploaded = getMd5Uploaded;
 exports.markFileInProgress = markFileInProgress;
 exports.updateFileStatus = updateFileStatus;
 exports.resetStuckFiles = resetStuckFiles;
-exports.resetFailedFiles = resetFailedFiles;
+exports.clearFailedFiles = clearFailedFiles;
 exports.clearUninitializedFiles = clearUninitializedFiles;
 exports.getUninitializedFiles = getUninitializedFiles;
 exports.getFileCounts = getFileCounts;
@@ -118,10 +118,9 @@ async function resetStuckFiles(userId) {
     await (0, exports.query)(`UPDATE drive_files SET status = 'uninitialized'
      WHERE user_id = $1 AND status = 'in_progress'`, [userId]);
 }
-// Reset failed files so they're retried on the next sync
-async function resetFailedFiles(userId) {
-    await (0, exports.query)(`UPDATE drive_files SET status = 'uninitialized', retry_count = 0
-     WHERE user_id = $1 AND status = 'failed'`, [userId]);
+// Clear failed files at the start of each sync so stale failures don't carry over
+async function clearFailedFiles(userId) {
+    await (0, exports.query)(`DELETE FROM drive_files WHERE user_id = $1 AND status = 'failed'`, [userId]);
 }
 // Clear uninitialized files before each sync so discovery re-populates them
 // up to the current limit — prevents stale counts from prior runs skewing the UI.

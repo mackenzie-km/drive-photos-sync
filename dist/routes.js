@@ -69,7 +69,12 @@ const SYNC_TIMEOUT_SECS = 3 * 60 * 60; // 3 hours
 router.post("/sync/start", requireAuth, async (req, res) => {
     try {
         const useAI = req.body?.useAI !== false; // default true
-        const runId = await (0, sync_1.startSync)(req.userId, useAI);
+        const folderId = req.body?.folderId;
+        if (!folderId) {
+            res.status(400).json({ error: "folderId is required" });
+            return;
+        }
+        const runId = await (0, sync_1.startSync)(req.userId, useAI, folderId);
         res.json({ runId, message: "Sync started" });
     }
     catch (err) {
@@ -105,5 +110,14 @@ router.get("/sync/status", requireAuth, async (req, res) => {
 router.get("/sync/files", requireAuth, async (req, res) => {
     const files = await (0, db_1.getUploadedFiles)(req.userId);
     res.json({ files });
+});
+router.get("/picker/config", requireAuth, async (req, res) => {
+    const userId = req.userId;
+    const row = await (0, db_1.getTokens)(userId);
+    res.json({
+        access_token: row?.access_token,
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        api_key: process.env.GOOGLE_API_KEY,
+    });
 });
 exports.default = router;

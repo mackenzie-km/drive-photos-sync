@@ -146,11 +146,10 @@ export async function resetStuckFiles(userId: string) {
   );
 }
 
-// Reset failed files so they're retried on the next sync
-export async function resetFailedFiles(userId: string) {
+// Clear failed files at the start of each sync so stale failures don't carry over
+export async function clearFailedFiles(userId: string) {
   await query(
-    `UPDATE drive_files SET status = 'uninitialized', retry_count = 0
-     WHERE user_id = $1 AND status = 'failed'`,
+    `DELETE FROM drive_files WHERE user_id = $1 AND status = 'failed'`,
     [userId],
   );
 }

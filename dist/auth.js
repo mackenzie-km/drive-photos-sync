@@ -6,7 +6,7 @@ exports.getAuthClient = getAuthClient;
 const googleapis_1 = require("googleapis");
 const db_1 = require("./db");
 const SCOPES = [
-    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.file",
     "https://www.googleapis.com/auth/photoslibrary.appendonly",
     "https://www.googleapis.com/auth/userinfo.profile",
 ];

@@ -10,11 +10,10 @@ import {
   markFileInProgress,
   updateFileStatus,
   resetStuckFiles,
-  resetFailedFiles,
+  clearFailedFiles,
   clearUninitializedFiles,
   createSyncRun,
   updateSyncRun,
-  getFileCounts,
   getMd5Uploaded,
 } from "./db";
 
@@ -59,6 +58,7 @@ export function requestAbort(userId: string) {
 export async function startSync(
   userId: string,
   useAI: boolean,
+  folderId: string,
 ): Promise<number> {
   const existing = userSyncState.get(userId);
   if (existing?.status === "discovering" || existing?.status === "uploading") {
@@ -75,7 +75,7 @@ export async function startSync(
   });
 
   // Fire and forget — progress is tracked in the DB and queryable via /sync/status
-  runSync(userId, runId, useAI).catch((err) => {
+  runSync(userId, runId, useAI, folderId).catch((err) => {
     console.error("[sync] fatal error:", err.message);
     finishRun(userId, runId, "failed", 0, 0, 0, 0);
   });
@@ -83,86 +83,52 @@ export async function startSync(
   return runId;
 }
 
-async function runSync(userId: string, runId: number, useAI: boolean) {
+async function runSync(
+  userId: string,
+  runId: number,
+  useAI: boolean,
+  folderId: string,
+) {
   const auth = await getAuthClient(userId);
   const state = userSyncState.get(userId)!;
 
-  // Reset any files stuck in_progress from a previous crash back to uninitialized
   await resetStuckFiles(userId);
-  // Give previously failed files another chance on each manual sync
-  await resetFailedFiles(userId);
+  await clearFailedFiles(userId);
+  await clearUninitializedFiles(userId);
 
-  // Without AI, raise the limit since we're not incurring Gemini costs
-  const MAX_UPLOADS_PER_USER = useAI ? 1_000 : 10_000;
+  // Cap per sync run — only applies when AI is on (Gemini adds time per file)
+  const MAX_PER_SYNC = useAI ? 5_000 : Infinity;
 
   // ── Phase 1: discover ──────────────────────────────────────────────────────
-  const preCounts = await getFileCounts(userId);
-  const byPreStatus = Object.fromEntries(
-    preCounts.map((r) => [r.status, Number(r.count)]),
-  );
-  const alreadyUploaded = byPreStatus.uploaded ?? 0;
-  const alreadyQueued =
-    alreadyUploaded +
-    (byPreStatus.uninitialized ?? 0) +
-    (byPreStatus.in_progress ?? 0) +
-    (byPreStatus.skipped ?? 0);
-  const discoverLimit = MAX_UPLOADS_PER_USER - alreadyUploaded;
-
   let discovered = 0;
+  state.status = "discovering";
+  console.log(`[sync:${userId}] Phase 1: discovering Drive photos in folder ${folderId}...`);
 
-  if (alreadyQueued >= MAX_UPLOADS_PER_USER) {
-    // DB already has enough files queued — skip rediscovery
-    console.log(
-      `[sync:${userId}] Phase 1: skipped (${alreadyQueued} files already queued).`,
+  for await (const file of listDrivePhotos(auth, folderId)) {
+    if (state.shouldAbort) break;
+    if (discovered >= MAX_PER_SYNC) break;
+    await upsertDriveFile(
+      file.id,
+      userId,
+      file.name,
+      file.md5,
+      file.mime_type,
+      file.size,
     );
-  } else {
-    // Clear uninitialized files so discovery re-populates up to the current limit
-    await clearUninitializedFiles(userId);
-    state.status = "discovering";
-    console.log(
-      `[sync:${userId}] Phase 1: discovering Drive photos (limit: ${discoverLimit})...`,
-    );
+    discovered++;
+    if (discovered % 500 === 0)
+      console.log(`[sync:${userId}]   ${discovered} files found so far...`);
+  }
 
-    for await (const file of listDrivePhotos(auth)) {
-      if (state.shouldAbort) break;
-      if (discovered >= discoverLimit) break;
-      await upsertDriveFile(
-        file.id,
-        userId,
-        file.name,
-        file.md5,
-        file.mime_type,
-        file.size,
-      );
-      discovered++;
-      if (discovered % 500 === 0)
-        console.log(`[sync:${userId}]   ${discovered} files found so far...`);
-    }
+  console.log(`[sync:${userId}] Discovery complete: ${discovered} photos found.`);
 
-    console.log(
-      `[sync:${userId}] Discovery complete: ${discovered} photos in Drive.`,
-    );
-
-    if (state.shouldAbort) {
-      return finishRun(userId, runId, "aborted", discovered, 0, 0, 0);
-    }
+  if (state.shouldAbort) {
+    return finishRun(userId, runId, "aborted", discovered, 0, 0, 0);
   }
 
   // ── Phase 2: upload ────────────────────────────────────────────────────────
   state.status = "uploading";
-  const counts = await getFileCounts(userId);
-  const byStatus = Object.fromEntries(
-    counts.map((r) => [r.status, Number(r.count)]),
-  );
-  const alreadyDone = byStatus.uploaded ?? 0;
-  const remaining = MAX_UPLOADS_PER_USER - alreadyDone;
   console.log(`[sync:${userId}] Phase 2: Preparing to upload photos.`);
-  if (remaining <= 0) {
-    console.log(
-      `[sync:${userId}] Upload limit of ${MAX_UPLOADS_PER_USER} reached.`,
-    );
-    return finishRun(userId, runId, "limit_reached", discovered, 0, 0, 0);
-  }
   let uploaded = 0,
     skipped = 0,
     failed = 0;
@@ -176,7 +142,7 @@ async function runSync(userId: string, runId: number, useAI: boolean) {
 
     for (const file of batch) {
       if (state.shouldAbort) break;
-      if (uploaded >= remaining) break;
+      if (uploaded >= MAX_PER_SYNC) break;
       try {
         // Dedup: if another file with the same md5 was already uploaded, skip
         if (file.md5 && (await getMd5Uploaded(userId, file.md5))) {
@@ -201,27 +167,30 @@ async function runSync(userId: string, runId: number, useAI: boolean) {
             ).catch(() => undefined)
           : undefined;
         const mediaId = await withRetry(() =>
-          uploadPhoto(auth, Readable.from(fileBuffer), file.name, file.mime_type, description),
+          uploadPhoto(
+            auth,
+            Readable.from(fileBuffer),
+            file.name,
+            file.mime_type,
+            description,
+          ),
         );
         await updateFileStatus("uploaded", mediaId, null, 0, file.id, userId);
         uploaded++;
         console.log(`[sync:${userId}]   ✓ ${file.name} (${uploaded} uploaded)`);
       } catch (err: any) {
         const reason = err.response?.data?.error?.errors?.[0]?.reason;
-        const detail = reason ? `${err.message} (reason: ${reason})` : err.message ?? "unknown error";
+        const detail = reason
+          ? `${err.message} (reason: ${reason})`
+          : (err.message ?? "unknown error");
         if (err.response?.data) {
-          console.log(`[sync:${userId}]   ✗ ${file.name}: ${detail} | response body: ${JSON.stringify(err.response.data)}`);
+          console.log(
+            `[sync:${userId}]   ✗ ${file.name}: ${detail} | response body: ${JSON.stringify(err.response.data)}`,
+          );
         } else {
           console.log(`[sync:${userId}]   ✗ ${file.name}: ${detail}`);
         }
-        await updateFileStatus(
-          "failed",
-          null,
-          detail,
-          1,
-          file.id,
-          userId,
-        );
+        await updateFileStatus("failed", null, detail, 1, file.id, userId);
         failed++;
       }
     }
@@ -241,7 +210,6 @@ async function runSync(userId: string, runId: number, useAI: boolean) {
     `[sync:${userId}] Finished. uploaded=${uploaded} skipped=${skipped} failed=${failed}`,
   );
 }
-
 
 function finishRun(
   userId: string,
