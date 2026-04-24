@@ -114,7 +114,8 @@ router.get("/sync/files", requireAuth, async (req, res) => {
 router.get("/picker/config", requireAuth, async (req, res) => {
     const userId = req.userId;
     const auth = await (0, auth_1.getAuthClient)(userId);
-    const { token } = await auth.getAccessToken();
+    const { credentials } = await auth.refreshAccessToken();
+    const token = credentials.access_token;
     if (!token) {
         res.status(401).json({ error: "token_expired" });
         return;
