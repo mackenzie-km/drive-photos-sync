@@ -71,6 +71,7 @@ const html = `<!doctype html>
     </p>
 
     <h2>How we protect your data</h2>
+    <p>OAuth tokens are sensitive data and are treated accordingly — encrypted in transit, encrypted at rest, and never logged or exposed in source code.</p>
     <p>We take the following steps to protect sensitive data:</p>
     <ul>
       <li>
