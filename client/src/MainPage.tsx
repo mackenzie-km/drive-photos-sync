@@ -127,7 +127,14 @@ export default function MainPage() {
   async function openPicker() {
     try {
       const res = await fetch("/picker/config");
-      if (!res.ok) throw new Error("Not authenticated");
+      if (res.status === 401) {
+        const body = await res.json().catch(() => ({}));
+        if (body.error === "token_expired") {
+          throw new Error("Your session has expired. Please sign out and sign in again.");
+        }
+        throw new Error("Not authenticated");
+      }
+      if (!res.ok) throw new Error("Could not load picker config");
       const { access_token, api_key } = await res.json();
 
       (window as any).gapi.load("picker", () => {

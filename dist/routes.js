@@ -115,6 +115,10 @@ router.get("/picker/config", requireAuth, async (req, res) => {
     const userId = req.userId;
     const auth = await (0, auth_1.getAuthClient)(userId);
     const { token } = await auth.getAccessToken();
+    if (!token) {
+        res.status(401).json({ error: "token_expired" });
+        return;
+    }
     res.json({
         access_token: token,
         client_id: process.env.GOOGLE_CLIENT_ID,
