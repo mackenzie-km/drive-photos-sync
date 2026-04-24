@@ -28,7 +28,7 @@ function requestAbort(userId) {
         userSyncState.delete(userId);
     }
 }
-async function startSync(userId, useAI, folderId) {
+async function startSync(userId, useAI, folderId, driveAccessToken) {
     const existing = userSyncState.get(userId);
     if (existing?.status === "discovering" || existing?.status === "uploading") {
         throw new Error("A sync is already running");
@@ -41,14 +41,17 @@ async function startSync(userId, useAI, folderId) {
         currentFile: null,
     });
     // Fire and forget — progress is tracked in the DB and queryable via /sync/status
-    runSync(userId, runId, useAI, folderId).catch((err) => {
+    runSync(userId, runId, useAI, folderId, driveAccessToken).catch((err) => {
         console.error("[sync] fatal error:", err.message);
         finishRun(userId, runId, "failed", 0, 0, 0, 0);
     });
     return runId;
 }
-async function runSync(userId, runId, useAI, folderId) {
-    const auth = await (0, auth_1.getAuthClient)(userId);
+async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
+    const driveAuth = driveAccessToken
+        ? (0, auth_1.createClientFromToken)(driveAccessToken)
+        : await (0, auth_1.getAuthClient)(userId);
+    const photosAuth = await (0, auth_1.getAuthClient)(userId);
     const state = userSyncState.get(userId);
     await (0, db_1.resetStuckFiles)(userId);
     await (0, db_1.clearFailedFiles)(userId);
@@ -60,7 +63,7 @@ async function runSync(userId, runId, useAI, folderId) {
     let limitReached = false;
     state.status = "discovering";
     console.log(`[sync:${userId}] Phase 1: discovering Drive photos in folder ${folderId}...`);
-    for await (const file of (0, drive_1.listDrivePhotos)(auth, folderId)) {
+    for await (const file of (0, drive_1.listDrivePhotos)(driveAuth, folderId)) {
         if (state.shouldAbort)
             break;
         if (discovered >= MAX_PER_SYNC) {
@@ -102,11 +105,11 @@ async function runSync(userId, runId, useAI, folderId) {
                 }
                 state.currentFile = file.name;
                 await (0, db_1.markFileInProgress)(file.id, userId);
-                const fileBuffer = await (0, drive_1.downloadDriveFile)(auth, file.id);
+                const fileBuffer = await (0, drive_1.downloadDriveFile)(driveAuth, file.id);
                 const description = useAI
                     ? await (0, retry_1.withRetry)(() => (0, gemini_1.generatePhotoDescription)(fileBuffer, file.mime_type)).catch(() => undefined)
                     : undefined;
-                const mediaId = await (0, retry_1.withRetry)(() => (0, photos_1.uploadPhoto)(auth, stream_1.Readable.from(fileBuffer), file.name, file.mime_type, description));
+                const mediaId = await (0, retry_1.withRetry)(() => (0, photos_1.uploadPhoto)(photosAuth, stream_1.Readable.from(fileBuffer), file.name, file.mime_type, description));
                 await (0, db_1.updateFileStatus)("uploaded", mediaId, null, 0, file.id, userId);
                 uploaded++;
                 console.log(`[sync:${userId}]   ✓ ${file.name} (${uploaded} uploaded)`);

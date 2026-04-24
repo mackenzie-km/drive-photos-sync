@@ -65,7 +65,7 @@ createdb drive_photos_sync
 cp .env.example .env
 ```
 
-Fill in `.env`:
+Fill in `.env` in your main project root:
 
 ```
 GOOGLE_CLIENT_ID=...
@@ -74,8 +74,14 @@ OAUTH_REDIRECT_URI=http://localhost:3000/auth/callback
 DATABASE_URL=postgres://localhost/drive_photos_sync
 SESSION_SECRET=<generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))">
 GEMINI_API_KEY=...
-GOOGLE_API_KEY=...
 PORT=3000
+```
+
+And also add one in your client folder:
+
+```
+VITE_GOOGLE_API_KEY=...
+VITE_GOOGLE_API_KEY=...
 ```
 
 ### Run Backend
@@ -100,12 +106,12 @@ npm run dev
 
 ### Sync (🔒 requires Google auth via `requireAuth` middleware)
 
-| Method | Route          | Description                                                                                                                                                                                                                                                       |
-| ------ | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/sync/status` | Tells you if you're syncing or not, and which file is currently being processed                                                                                                                                                                                   |
-| `GET`  | `/sync/files`  | Returns list of already uploaded files                                                                                                                                                                                                                            |
+| Method | Route          | Description                                                                                                                                                                                                                                                                                                               |
+| ------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/sync/status` | Tells you if you're syncing or not, and which file is currently being processed                                                                                                                                                                                                                                           |
+| `GET`  | `/sync/files`  | Returns list of already uploaded files                                                                                                                                                                                                                                                                                    |
 | `POST` | `/sync/start`  | Kicks off the sync process. Requires `folderId` (from the Picker) and accepts `useAI` (default `true`). Discovers photos in the selected folder, saves records to DB, optionally sends photos to Gemini for descriptions, then uploads to Google Photos one at a time. Capped at 5,000 files per sync when AI is enabled. |
-| `POST` | `/sync/abort`  | Gracefully stops sync: immediately clears local memory and sets a flag so the loop stops after the current file finishes                                                                                                                                          |
+| `POST` | `/sync/abort`  | Gracefully stops sync: immediately clears local memory and sets a flag so the loop stops after the current file finishes                                                                                                                                                                                                  |
 
 ### Health
 
@@ -167,6 +173,7 @@ uninitialized → in_progress → uploaded
 ```
 
 At the start of each sync run:
+
 - Files stuck in `in_progress` (e.g. from a crash) are reset to `uninitialized`
 - All `failed` and `uninitialized` files are deleted so the selected folder is re-discovered fresh — this prevents failures from a previous folder bleeding into the new sync
 
@@ -194,12 +201,12 @@ OAUTH_REDIRECT_URI=https://your-domain.com/auth/callback  # must match Google Cl
 DATABASE_URL        # provided automatically by Render Postgres addon
 SESSION_SECRET
 GEMINI_API_KEY
-GOOGLE_API_KEY
 FRONTEND_URL=https://your-domain.com
 NODE_ENV=production
 ```
 
 Also register `https://your-domain.com/auth/callback` as an authorized redirect URI in Google Cloud Console.
+And register `https://your-domain.com` as an authorized JavaScript Origin in Google Cloud Console.
 
 ### Vercel (frontend)
 
@@ -207,6 +214,7 @@ Set these environment variables in the Vercel project dashboard:
 
 ```
 BACKEND_URL=https://your-backend.onrender.com
+GOOGLE_API_KEY
 ```
 
 This is used by the `/api/auth/callback` serverless function, which proxies the OAuth callback from Google to the Render backend and forwards the `Set-Cookie` header back to the browser. Vercel's rewrite proxy strips `Set-Cookie` headers, so `/auth/callback` uses a serverless function instead — all other routes use rewrites in `vercel.json`.

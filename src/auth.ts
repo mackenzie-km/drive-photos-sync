@@ -54,6 +54,12 @@ export async function handleCallback(code: string): Promise<string> {
   return userId;
 }
 
+export function createClientFromToken(accessToken: string): OAuth2Client {
+  const client = createClient();
+  client.setCredentials({ access_token: accessToken });
+  return client;
+}
+
 export async function getAuthClient(userId: string): Promise<OAuth2Client> {
   const row = await getTokens(userId);
   if (!row?.refresh_token) {

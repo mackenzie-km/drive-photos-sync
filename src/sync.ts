@@ -1,5 +1,5 @@
 import { withRetry } from "./retry";
-import { getAuthClient } from "./auth";
+import { getAuthClient, createClientFromToken } from "./auth";
 import { Readable } from "stream";
 import { listDrivePhotos, downloadDriveFile } from "./drive";
 import { generatePhotoDescription } from "./gemini";
@@ -59,6 +59,7 @@ export async function startSync(
   userId: string,
   useAI: boolean,
   folderId: string,
+  driveAccessToken?: string,
 ): Promise<number> {
   const existing = userSyncState.get(userId);
   if (existing?.status === "discovering" || existing?.status === "uploading") {
@@ -75,7 +76,7 @@ export async function startSync(
   });
 
   // Fire and forget — progress is tracked in the DB and queryable via /sync/status
-  runSync(userId, runId, useAI, folderId).catch((err) => {
+  runSync(userId, runId, useAI, folderId, driveAccessToken).catch((err) => {
     console.error("[sync] fatal error:", err.message);
     finishRun(userId, runId, "failed", 0, 0, 0, 0);
   });
@@ -88,8 +89,12 @@ async function runSync(
   runId: number,
   useAI: boolean,
   folderId: string,
+  driveAccessToken?: string,
 ) {
-  const auth = await getAuthClient(userId);
+  const driveAuth = driveAccessToken
+    ? createClientFromToken(driveAccessToken)
+    : await getAuthClient(userId);
+  const photosAuth = await getAuthClient(userId);
   const state = userSyncState.get(userId)!;
 
   await resetStuckFiles(userId);
@@ -107,7 +112,7 @@ async function runSync(
     `[sync:${userId}] Phase 1: discovering Drive photos in folder ${folderId}...`,
   );
 
-  for await (const file of listDrivePhotos(auth, folderId)) {
+  for await (const file of listDrivePhotos(driveAuth, folderId)) {
     if (state.shouldAbort) break;
     if (discovered >= MAX_PER_SYNC) { limitReached = true; break; }
     await upsertDriveFile(
@@ -165,7 +170,7 @@ async function runSync(
 
         state.currentFile = file.name;
         await markFileInProgress(file.id, userId);
-        const fileBuffer = await downloadDriveFile(auth, file.id);
+        const fileBuffer = await downloadDriveFile(driveAuth, file.id);
         const description = useAI
           ? await withRetry(() =>
               generatePhotoDescription(fileBuffer, file.mime_type),
@@ -173,7 +178,7 @@ async function runSync(
           : undefined;
         const mediaId = await withRetry(() =>
           uploadPhoto(
-            auth,
+            photosAuth,
             Readable.from(fileBuffer),
             file.name,
             file.mime_type,

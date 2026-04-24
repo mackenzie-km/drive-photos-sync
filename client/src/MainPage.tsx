@@ -50,6 +50,9 @@ const STATUS_LABEL: Record<string, string> = {
 const IS_RUNNING = (status: string) =>
   status === "discovering" || status === "uploading";
 
+const apiKey = import.meta.env.VITE_GOOGLE_API_KEY;
+const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+
 export default function MainPage() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [showFiles, setShowFiles] = useState(false);
@@ -58,6 +61,7 @@ export default function MainPage() {
   const [useAI, setUseAI] = useState(true);
   const [folderId, setFolderId] = useState<string | null>(null);
   const [folderName, setFolderName] = useState<string | null>(null);
+  const [driveAccessToken, setDriveAccessToken] = useState<string | null>(null);
 
   useEffect(() => {
     const poll = () => {
@@ -96,7 +100,7 @@ export default function MainPage() {
       const res = await fetch("/sync/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ useAI, folderId }),
+        body: JSON.stringify({ useAI, folderId, driveAccessToken }),
       });
       if (res.ok) {
         setSyncStatus((prev) =>
@@ -124,41 +128,41 @@ export default function MainPage() {
     }
   }
 
-  async function openPicker() {
-    try {
-      const res = await fetch("/picker/config");
-      if (res.status === 401) {
-        const body = await res.json().catch(() => ({}));
-        if (body.error === "token_expired") {
-          throw new Error("Your session has expired. Please sign out and sign in again.");
-        }
-        throw new Error("Not authenticated");
-      }
-      if (!res.ok) throw new Error("Could not load picker config");
-      const { access_token, api_key } = await res.json();
+  function openPicker() {
+    // google variable comes from GIS script
+    const tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: "https://www.googleapis.com/auth/drive.file",
+      callback: (response: any) => {
+        const access_token = response.access_token;
 
-      (window as any).gapi.load("picker", () => {
-        const gp = (window as any).google.picker;
-        const folderView = new gp.DocsView()
-          .setIncludeFolders(true)
-          .setSelectFolderEnabled(true)
-          .setMimeTypes("application/vnd.google-apps.folder");
-        const picker = new gp.PickerBuilder()
-          .addView(folderView)
-          .setOAuthToken(access_token)
-          .setDeveloperKey(api_key)
-          .setCallback((data: any) => {
-            if (data.action === gp.Action.PICKED) {
-              setFolderId(data.docs[0].id);
-              setFolderName(data.docs[0].name);
-            }
-          })
-          .build();
-        picker.setVisible(true);
-      });
-    } catch (e: any) {
-      setError("Could not open picker: " + e.message);
-    }
+        if (!access_token) {
+          console.error("No token returned");
+          return;
+        }
+        (window as any).gapi.load("picker", () => {
+          const gp = (window as any).google.picker;
+          const folderView = new gp.DocsView()
+            .setIncludeFolders(true)
+            .setSelectFolderEnabled(true)
+            .setMimeTypes("application/vnd.google-apps.folder");
+          const picker = new gp.PickerBuilder()
+            .addView(folderView)
+            .setOAuthToken(access_token)
+            .setDeveloperKey(apiKey)
+            .setCallback((data: any) => {
+              if (data.action === gp.Action.PICKED) {
+                setFolderId(data.docs[0].id);
+                setFolderName(data.docs[0].name);
+                setDriveAccessToken(access_token);
+              }
+            })
+            .build();
+          picker.setVisible(true);
+        });
+      },
+    });
+    tokenClient.requestAccessToken();
   }
 
   async function handleAbort() {

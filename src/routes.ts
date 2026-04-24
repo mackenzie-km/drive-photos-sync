@@ -75,11 +75,12 @@ router.post("/sync/start", requireAuth, async (req: Request, res: Response) => {
   try {
     const useAI = req.body?.useAI !== false; // default true
     const folderId = req.body?.folderId as string;
+    const driveAccessToken = req.body?.driveAccessToken as string | undefined;
     if (!folderId) {
       res.status(400).json({ error: "folderId is required" });
       return;
     }
-    const runId = await startSync((req as any).userId, useAI, folderId);
+    const runId = await startSync((req as any).userId, useAI, folderId, driveAccessToken);
     res.json({ runId, message: "Sync started" });
   } catch (err: any) {
     res.status(400).json({ error: err.message });

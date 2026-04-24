@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getAuthUrl = getAuthUrl;
 exports.handleCallback = handleCallback;
+exports.createClientFromToken = createClientFromToken;
 exports.getAuthClient = getAuthClient;
 const googleapis_1 = require("googleapis");
 const db_1 = require("./db");
@@ -37,6 +38,11 @@ async function handleCallback(code) {
     const userId = data.id;
     await (0, db_1.saveTokens)(userId, tokens.access_token ?? null, tokens.refresh_token ?? null, tokens.expiry_date ?? null);
     return userId;
+}
+function createClientFromToken(accessToken) {
+    const client = createClient();
+    client.setCredentials({ access_token: accessToken });
+    return client;
 }
 async function getAuthClient(userId) {
     const row = await (0, db_1.getTokens)(userId);
