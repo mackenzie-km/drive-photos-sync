@@ -97,12 +97,14 @@ async function runSync(
   await clearUninitializedFiles(userId);
 
   // Cap per sync run — only applies when AI is on (Gemini adds time per file)
-  const MAX_PER_SYNC = useAI ? 5_000 : Infinity;
+  const MAX_PER_SYNC = useAI ? 5_000 : 20_000;
 
   // ── Phase 1: discover ──────────────────────────────────────────────────────
   let discovered = 0;
   state.status = "discovering";
-  console.log(`[sync:${userId}] Phase 1: discovering Drive photos in folder ${folderId}...`);
+  console.log(
+    `[sync:${userId}] Phase 1: discovering Drive photos in folder ${folderId}...`,
+  );
 
   for await (const file of listDrivePhotos(auth, folderId)) {
     if (state.shouldAbort) break;
@@ -120,7 +122,9 @@ async function runSync(
       console.log(`[sync:${userId}]   ${discovered} files found so far...`);
   }
 
-  console.log(`[sync:${userId}] Discovery complete: ${discovered} photos found.`);
+  console.log(
+    `[sync:${userId}] Discovery complete: ${discovered} photos found.`,
+  );
 
   if (state.shouldAbort) {
     return finishRun(userId, runId, "aborted", discovered, 0, 0, 0);
