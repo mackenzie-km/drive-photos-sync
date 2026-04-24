@@ -21,7 +21,7 @@ jest.mock("./db", () => ({
   markFileInProgress: jest.fn().mockResolvedValue(undefined),
   updateFileStatus: jest.fn().mockResolvedValue(undefined),
   resetStuckFiles: jest.fn().mockResolvedValue(undefined),
-  resetFailedFiles: jest.fn().mockResolvedValue(undefined),
+  clearFailedFiles: jest.fn().mockResolvedValue(undefined),
   clearUninitializedFiles: jest.fn().mockResolvedValue(undefined),
   createSyncRun: jest.fn().mockResolvedValue(1),
   updateSyncRun: jest.fn().mockResolvedValue(undefined),
@@ -59,8 +59,12 @@ const FILE = {
 };
 
 describe("requestAbort", () => {
+  beforeEach(() => {
+    mockListDrivePhotos.mockImplementation(async function* () {});
+  });
+
   it("clears the sync state so status returns idle", async () => {
-    await startSync("user-abort-1", true);
+    await startSync("user-abort-1", true, "test-folder-id");
     expect(getSyncState("user-abort-1").status).not.toBe("idle");
 
     requestAbort("user-abort-1");
@@ -84,7 +88,7 @@ describe("startSync — MD5 dedup", () => {
     // Simulate an already-uploaded file with the same md5
     mockGetMd5Uploaded.mockResolvedValue({ id: "already-uploaded-file" });
 
-    await startSync("user-dedup-1", true);
+    await startSync("user-dedup-1", true, "test-folder-id");
     await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
 
     expect(mockUpdateFileStatus).toHaveBeenCalledWith(
@@ -104,7 +108,7 @@ describe("startSync — MD5 dedup", () => {
 
     mockGetMd5Uploaded.mockResolvedValue(null);
 
-    await startSync("user-dedup-2", true);
+    await startSync("user-dedup-2", true, "test-folder-id");
     await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
 
     expect(mockUpdateFileStatus).not.toHaveBeenCalledWith(
@@ -142,7 +146,7 @@ describe("startSync — Gemini integration", () => {
       "sunset, beach, ocean, couple, silhouette, golden hour, romantic, waves, sand, travel",
     );
 
-    await startSync("user-gemini-1", true);
+    await startSync("user-gemini-1", true, "test-folder-id");
     await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
 
     expect(mockGeneratePhotoDescription).toHaveBeenCalledWith(
@@ -156,7 +160,7 @@ describe("startSync — Gemini integration", () => {
       .mockResolvedValueOnce([FILE])
       .mockResolvedValue([]);
 
-    await startSync("user-gemini-2", false);
+    await startSync("user-gemini-2", false, "test-folder-id");
     await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
 
     expect(mockGeneratePhotoDescription).not.toHaveBeenCalled();

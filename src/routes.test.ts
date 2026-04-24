@@ -36,6 +36,7 @@ const mockRequestAbort = requestAbort as jest.Mock;
 // Pass a userId to simulate an already-authenticated session.
 function createApp(userId?: string) {
   const app = express();
+  app.use(express.json());
   app.use(session({ secret: "test", resave: false, saveUninitialized: false }));
   if (userId) {
     app.use((req, _res, next) => {
@@ -52,7 +53,9 @@ describe("POST /sync/start", () => {
 
   it("returns 400 with an error message when a sync is already running", async () => {
     mockStartSync.mockRejectedValue(new Error("A sync is already running"));
-    const res = await request(createApp("user-123")).post("/sync/start");
+    const res = await request(createApp("user-123"))
+      .post("/sync/start")
+      .send({ folderId: "test-folder-id" });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("A sync is already running");
   });
@@ -100,6 +103,11 @@ describe("GET /auth/callback — auth errors redirect to FRONTEND_URL with a ban
   beforeEach(() => {
     jest.clearAllMocks();
     delete process.env.FRONTEND_URL;
+    jest.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it("redirects with auth_error when Google omits the code (e.g. user denied access)", async () => {

@@ -36,7 +36,7 @@ describe("listDrivePhotos", () => {
       },
     });
 
-    const files = await collect(listDrivePhotos(mockAuth));
+    const files = await collect(listDrivePhotos(mockAuth, "test-folder-id"));
 
     expect(files).toEqual([
       { id: "file-1", name: "photo.jpg", md5: "abc123", mime_type: "image/jpeg", size: 1024 },
@@ -59,7 +59,7 @@ describe("listDrivePhotos", () => {
         },
       });
 
-    const files = await collect(listDrivePhotos(mockAuth));
+    const files = await collect(listDrivePhotos(mockAuth, "test-folder-id"));
 
     expect(files).toHaveLength(2);
     expect(files[0].id).toBe("file-1");

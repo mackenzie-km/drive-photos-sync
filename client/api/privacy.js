@@ -24,19 +24,20 @@ const html = `<!doctype html>
   </head>
   <body>
     <h1>Tag and Sync — Privacy Policy</h1>
-    <p class="updated">Last updated: April 21, 2026</p>
+    <p class="updated">Last updated: April 24, 2026</p>
 
     <h2>What is Tag and Sync?</h2>
     <p>
-      Tag and Sync is a web application that syncs photos from your Google Drive
-      to Google Photos. Optionally, it uses Google Gemini to generate
-      search-friendly descriptions for your photos.
+      Tag and Sync is a web application that syncs photos from a folder in your
+      Google Drive to Google Photos. You choose the folder using the Google Drive
+      Picker. Optionally, it uses Google Gemini to generate search-friendly
+      descriptions for your photos.
     </p>
 
     <h2>What data we access</h2>
     <p>To operate the service, Tag and Sync requests access to:</p>
     <ul>
-      <li>Your <strong>Google Drive</strong> — to read photo files you have stored there</li>
+      <li>Your <strong>Google Drive</strong> — specifically the folder you select via the Google Drive Picker, to read photo files stored there</li>
       <li>Your <strong>Google Photos</strong> — to upload those photos on your behalf</li>
       <li>Your <strong>Google account identity</strong> — to associate your data with your account</li>
     </ul>
@@ -89,11 +90,10 @@ const html = `<!doctype html>
       </li>
       <li>
         <strong>Minimal scope</strong> — we request only the Drive, Photos, and
-        identity scopes required for the sync to function. We request
-        <code>drive.readonly</code> (read-only access) because the app needs to
-        read photos you have previously stored in Drive — photos not created by
-        this app — which the more-restricted <code>drive.file</code> scope does
-        not cover.
+        identity scopes required for the sync to function. We use
+        <code>drive.file</code>, which restricts access to only the specific
+        folder you select via the Google Drive Picker — the app cannot read
+        any other files in your Drive.
       </li>
       <li>
         <strong>Session security</strong> — session cookies are marked
@@ -113,6 +113,7 @@ const html = `<!doctype html>
     <p>Tag and Sync uses the following Google services, each governed by Google's own privacy policy:</p>
     <ul>
       <li>Google Drive API</li>
+      <li>Google Drive Picker API — used to display a folder-selection dialog in your browser; no folder content is accessed until you explicitly select a folder and start a sync</li>
       <li>Google Photos Library API</li>
       <li>Google Gemini API (optional)</li>
     </ul>
