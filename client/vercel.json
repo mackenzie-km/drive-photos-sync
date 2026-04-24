@@ -27,6 +27,10 @@
     {
       "source": "/sync/:path*",
       "destination": "https://drive-photos-sync.onrender.com/sync/:path*"
+    },
+    {
+      "source": "/picker/:path*",
+      "destination": "https://drive-photos-sync.onrender.com/picker/:path*"
     }
   ]
 }
