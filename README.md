@@ -214,7 +214,8 @@ Set these environment variables in the Vercel project dashboard:
 
 ```
 BACKEND_URL=https://your-backend.onrender.com
-GOOGLE_API_KEY
+VITE_GOOGLE_CLIENT_ID
+VITE_GOOGLE_API_KEY
 ```
 
 This is used by the `/api/auth/callback` serverless function, which proxies the OAuth callback from Google to the Render backend and forwards the `Set-Cookie` header back to the browser. Vercel's rewrite proxy strips `Set-Cookie` headers, so `/auth/callback` uses a serverless function instead — all other routes use rewrites in `vercel.json`.

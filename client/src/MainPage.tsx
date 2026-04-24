@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 
+declare const google: any;
+
 interface SyncStatus {
   status:
     | "idle"
