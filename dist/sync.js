@@ -57,13 +57,16 @@ async function runSync(userId, runId, useAI, folderId) {
     const MAX_PER_SYNC = useAI ? 5_000 : 20_000;
     // ── Phase 1: discover ──────────────────────────────────────────────────────
     let discovered = 0;
+    let limitReached = false;
     state.status = "discovering";
     console.log(`[sync:${userId}] Phase 1: discovering Drive photos in folder ${folderId}...`);
     for await (const file of (0, drive_1.listDrivePhotos)(auth, folderId)) {
         if (state.shouldAbort)
             break;
-        if (discovered >= MAX_PER_SYNC)
+        if (discovered >= MAX_PER_SYNC) {
+            limitReached = true;
             break;
+        }
         await (0, db_1.upsertDriveFile)(file.id, userId, file.name, file.md5, file.mime_type, file.size);
         discovered++;
         if (discovered % 500 === 0)
@@ -77,7 +80,7 @@ async function runSync(userId, runId, useAI, folderId) {
     state.status = "uploading";
     console.log(`[sync:${userId}] Phase 2: Preparing to upload photos.`);
     let uploaded = 0, skipped = 0, failed = 0;
-    while (!state.shouldAbort) {
+    while (!state.shouldAbort && !limitReached) {
         const batch = await (0, db_1.getUninitializedFiles)(userId);
         if (batch.length === 0) {
             console.log(`[sync:${userId}] 0 uninitialized files remaining.`);
@@ -86,8 +89,10 @@ async function runSync(userId, runId, useAI, folderId) {
         for (const file of batch) {
             if (state.shouldAbort)
                 break;
-            if (uploaded >= MAX_PER_SYNC)
+            if (uploaded >= MAX_PER_SYNC) {
+                limitReached = true;
                 break;
+            }
             try {
                 // Dedup: if another file with the same md5 was already uploaded, skip
                 if (file.md5 && (await (0, db_1.getMd5Uploaded)(userId, file.md5))) {
@@ -123,7 +128,7 @@ async function runSync(userId, runId, useAI, folderId) {
         }
     }
     state.currentFile = null;
-    finishRun(userId, runId, state.shouldAbort ? "aborted" : "done", discovered, uploaded, skipped, failed);
+    finishRun(userId, runId, state.shouldAbort ? "aborted" : limitReached ? "limit_reached" : "done", discovered, uploaded, skipped, failed);
     console.log(`[sync:${userId}] Finished. uploaded=${uploaded} skipped=${skipped} failed=${failed}`);
 }
 function finishRun(userId, runId, status, total, uploaded, skipped, failed) {
