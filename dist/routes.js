@@ -113,9 +113,10 @@ router.get("/sync/files", requireAuth, async (req, res) => {
 });
 router.get("/picker/config", requireAuth, async (req, res) => {
     const userId = req.userId;
-    const row = await (0, db_1.getTokens)(userId);
+    const auth = await (0, auth_1.getAuthClient)(userId);
+    const { token } = await auth.getAccessToken();
     res.json({
-        access_token: row?.access_token,
+        access_token: token,
         client_id: process.env.GOOGLE_CLIENT_ID,
         api_key: process.env.GOOGLE_API_KEY,
     });

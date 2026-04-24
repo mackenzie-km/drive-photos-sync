@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
-import { getAuthUrl, handleCallback } from "./auth";
+import { getAuthUrl, handleCallback, getAuthClient } from "./auth";
 import { startSync, getSyncState, requestAbort } from "./sync";
-import { getLatestSyncRun, getFileCounts, getUploadedFiles, query, getTokens } from "./db";
+import { getLatestSyncRun, getFileCounts, getUploadedFiles, query } from "./db";
 
 const router = Router();
 
@@ -125,9 +125,10 @@ router.get("/sync/files", requireAuth, async (req: Request, res: Response) => {
 
 router.get("/picker/config", requireAuth, async (req: Request, res: Response) => {
   const userId = (req as any).userId;
-  const row = await getTokens(userId);
+  const auth = await getAuthClient(userId);
+  const { token } = await auth.getAccessToken();
   res.json({
-    access_token: row?.access_token,
+    access_token: token,
     client_id: process.env.GOOGLE_CLIENT_ID,
     api_key: process.env.GOOGLE_API_KEY,
   });
