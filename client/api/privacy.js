@@ -93,7 +93,9 @@ const html = `<!doctype html>
         identity scopes required for the sync to function. We use
         <code>drive.file</code>, which restricts access to only the specific
         folder you select via the Google Drive Picker — the app cannot read
-        any other files in your Drive.
+        any other files in your Drive. The Google Drive Picker is a
+        Google-hosted interface — our servers never receive or process your
+        Drive file listing. We only receive the folder ID you explicitly select.
       </li>
       <li>
         <strong>Session security</strong> — session cookies are marked
@@ -112,8 +114,8 @@ const html = `<!doctype html>
     <h2>Third-party services</h2>
     <p>Tag and Sync uses the following Google services, each governed by Google's own privacy policy:</p>
     <ul>
-      <li>Google Drive API</li>
-      <li>Google Drive Picker API — used to display a folder-selection dialog in your browser; no folder content is accessed until you explicitly select a folder and start a sync</li>
+      <li>Google Identity / OAuth 2.0 (sign-in and authorization)</li>
+      <li>Google Drive API and Google Drive Picker</li>
       <li>Google Photos Library API</li>
       <li>Google Gemini API (optional)</li>
     </ul>
