@@ -28,8 +28,8 @@ app.use((0, cors_1.default)({
 app.use(express_1.default.json());
 app.use((0, express_session_1.default)({
     store: new PgStore({
-        conString: process.env.DATABASE_URL,
-        createTableIfMissing: true, // auto-creates a "session" table in Postgres
+        pool: db_1.pool,
+        createTableIfMissing: true,
     }),
     secret: process.env.SESSION_SECRET ?? "dev-secret-change-in-production",
     resave: false,

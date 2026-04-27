@@ -4,7 +4,7 @@ import cors from "cors";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
 import routes from "./routes";
-import { initDb } from "./db";
+import { initDb, pool } from "./db";
 
 process.on("uncaughtException", (err) => {
   console.error("[crash] uncaughtException:", err);
@@ -30,8 +30,8 @@ app.use(express.json());
 app.use(
   session({
     store: new PgStore({
-      conString: process.env.DATABASE_URL,
-      createTableIfMissing: true, // auto-creates a "session" table in Postgres
+      pool,
+      createTableIfMissing: true,
     }),
     secret: process.env.SESSION_SECRET ?? "dev-secret-change-in-production",
     resave: false,

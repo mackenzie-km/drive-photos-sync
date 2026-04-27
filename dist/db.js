@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.query = void 0;
+exports.query = exports.pool = void 0;
 exports.initDb = initDb;
 exports.saveTokens = saveTokens;
 exports.getTokens = getTokens;
@@ -20,7 +20,12 @@ exports.getLatestSyncRun = getLatestSyncRun;
 const pg_1 = require("pg");
 // A Pool manages multiple connections — rather than opening/closing a connection
 // on every query, it keeps a set open and reuses them across requests.
-const pool = new pg_1.Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new pg_1.Pool({
+    connectionString: process.env.DATABASE_URL,
+    max: 2,
+    idleTimeoutMillis: 30000,
+});
+exports.pool = pool;
 const query = (text, params) => pool.query(text, params);
 exports.query = query;
 // Called once at startup before the server begins accepting requests.

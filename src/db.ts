@@ -2,7 +2,13 @@ import { Pool } from "pg";
 
 // A Pool manages multiple connections — rather than opening/closing a connection
 // on every query, it keeps a set open and reuses them across requests.
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 2,
+  idleTimeoutMillis: 30000,
+});
+
+export { pool };
 
 export const query = (text: string, params?: any[]) => pool.query(text, params);
 
