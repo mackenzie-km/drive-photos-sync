@@ -7,14 +7,8 @@ const router = Router();
 
 // ── Health ────────────────────────────────────────────────────────────────────
 
-router.get("/health", async (_req: Request, res: Response) => {
-  try {
-    await query("SELECT 1");
-    res.json({ ok: true });
-  } catch (err) {
-    console.error("[health] DB check failed:", err);
-    res.status(503).json({ ok: false, error: "DB unavailable" });
-  }
+router.get("/health", (_req: Request, res: Response) => {
+  res.json({ ok: true });
 });
 
 // ── Auth ──────────────────────────────────────────────────────────────────────

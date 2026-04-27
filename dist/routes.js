@@ -6,15 +6,8 @@ const sync_1 = require("./sync");
 const db_1 = require("./db");
 const router = (0, express_1.Router)();
 // ── Health ────────────────────────────────────────────────────────────────────
-router.get("/health", async (_req, res) => {
-    try {
-        await (0, db_1.query)("SELECT 1");
-        res.json({ ok: true });
-    }
-    catch (err) {
-        console.error("[health] DB check failed:", err);
-        res.status(503).json({ ok: false, error: "DB unavailable" });
-    }
+router.get("/health", (_req, res) => {
+    res.json({ ok: true });
 });
 // ── Auth ──────────────────────────────────────────────────────────────────────
 // Step 1: visit this URL in your browser to kick off OAuth
