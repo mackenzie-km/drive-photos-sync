@@ -57,7 +57,7 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
     await (0, db_1.clearFailedFiles)(userId);
     await (0, db_1.clearUninitializedFiles)(userId);
     // Cap per sync run — only applies when AI is on (Gemini adds time per file)
-    const MAX_PER_SYNC = useAI ? 5_000 : 20_000;
+    const MAX_PER_SYNC = useAI ? 10_000 : 20_000;
     // ── Phase 1: discover ──────────────────────────────────────────────────────
     let discovered = 0;
     let limitReached = false;

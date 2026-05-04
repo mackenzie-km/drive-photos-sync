@@ -102,7 +102,7 @@ async function runSync(
   await clearUninitializedFiles(userId);
 
   // Cap per sync run — only applies when AI is on (Gemini adds time per file)
-  const MAX_PER_SYNC = useAI ? 5_000 : 20_000;
+  const MAX_PER_SYNC = useAI ? 10_000 : 20_000;
 
   // ── Phase 1: discover ──────────────────────────────────────────────────────
   let discovered = 0;
@@ -114,7 +114,10 @@ async function runSync(
 
   for await (const file of listDrivePhotos(driveAuth, folderId)) {
     if (state.shouldAbort) break;
-    if (discovered >= MAX_PER_SYNC) { limitReached = true; break; }
+    if (discovered >= MAX_PER_SYNC) {
+      limitReached = true;
+      break;
+    }
     await upsertDriveFile(
       file.id,
       userId,
@@ -152,7 +155,10 @@ async function runSync(
 
     for (const file of batch) {
       if (state.shouldAbort) break;
-      if (uploaded >= MAX_PER_SYNC) { limitReached = true; break; }
+      if (uploaded >= MAX_PER_SYNC) {
+        limitReached = true;
+        break;
+      }
       try {
         // Dedup: if another file with the same md5 was already uploaded, skip
         if (file.md5 && (await getMd5Uploaded(userId, file.md5))) {
