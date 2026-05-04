@@ -21,7 +21,7 @@ Why search through drive, hunting around for your old photos? This web app
 
 1. You authenticate with Google via OAuth
 2. You use the Google Drive Picker to select a specific folder to sync
-3. The app discovers all image files in that folder (up to 5,000 with AI, unlimited without)
+3. The app discovers all image files in that folder (up to 10,000 with AI, unlimited without)
 4. Each file is downloaded and optionally sent to Gemini to generate a descriptive caption
 5. The file is uploaded to Google Photos with the caption attached
 6. Progress is tracked in Postgres — syncs are resumable and idempotent
@@ -106,12 +106,12 @@ npm run dev
 
 ### Sync (🔒 requires Google auth via `requireAuth` middleware)
 
-| Method | Route          | Description                                                                                                                                                                                                                                                                                                               |
-| ------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/sync/status` | Tells you if you're syncing or not, and which file is currently being processed                                                                                                                                                                                                                                           |
-| `GET`  | `/sync/files`  | Returns list of already uploaded files                                                                                                                                                                                                                                                                                    |
-| `POST` | `/sync/start`  | Kicks off the sync process. Requires `folderId` (from the Picker) and accepts `useAI` (default `true`). Discovers photos in the selected folder, saves records to DB, optionally sends photos to Gemini for descriptions, then uploads to Google Photos one at a time. Capped at 5,000 files per sync when AI is enabled. |
-| `POST` | `/sync/abort`  | Gracefully stops sync: immediately clears local memory and sets a flag so the loop stops after the current file finishes                                                                                                                                                                                                  |
+| Method | Route          | Description                                                                                                                                                                                                                                                                                                                |
+| ------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/sync/status` | Tells you if you're syncing or not, and which file is currently being processed                                                                                                                                                                                                                                            |
+| `GET`  | `/sync/files`  | Returns list of already uploaded files                                                                                                                                                                                                                                                                                     |
+| `POST` | `/sync/start`  | Kicks off the sync process. Requires `folderId` (from the Picker) and accepts `useAI` (default `true`). Discovers photos in the selected folder, saves records to DB, optionally sends photos to Gemini for descriptions, then uploads to Google Photos one at a time. Capped at 10,000 files per sync when AI is enabled. |
+| `POST` | `/sync/abort`  | Gracefully stops sync: immediately clears local memory and sets a flag so the loop stops after the current file finishes                                                                                                                                                                                                   |
 
 ### Health
 
