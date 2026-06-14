@@ -131,27 +131,37 @@ export default function MainPage() {
 
   async function openPicker() {
     const res = await fetch("/picker/config");
-    const { access_token, api_key } = await res.json();
+    const { client_id, api_key } = await res.json();
 
-    (window as any).gapi.load("picker", () => {
-      const gp = (window as any).google.picker;
-      const folderView = new gp.DocsView()
-        .setIncludeFolders(true)
-        .setSelectFolderEnabled(true)
-        .setMimeTypes("application/vnd.google-apps.folder");
-      let builder = new gp.PickerBuilder()
-        .addView(folderView)
-        .setOAuthToken(access_token)
-        .setCallback((data: any) => {
-          if (data.action === gp.Action.PICKED) {
-            setFolderId(data.docs[0].id);
-            setFolderName(data.docs[0].name);
-            setDriveAccessToken(access_token);
-          }
+    const tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
+      client_id,
+      scope: "https://www.googleapis.com/auth/drive.file",
+      callback: (response: any) => {
+        const access_token = response.access_token;
+        if (!access_token) return;
+
+        (window as any).gapi.load("picker", () => {
+          const gp = (window as any).google.picker;
+          const folderView = new gp.DocsView()
+            .setIncludeFolders(true)
+            .setSelectFolderEnabled(true)
+            .setMimeTypes("application/vnd.google-apps.folder");
+          let builder = new gp.PickerBuilder()
+            .addView(folderView)
+            .setOAuthToken(access_token)
+            .setCallback((data: any) => {
+              if (data.action === gp.Action.PICKED) {
+                setFolderId(data.docs[0].id);
+                setFolderName(data.docs[0].name);
+                setDriveAccessToken(access_token);
+              }
+            });
+          if (api_key) builder = builder.setDeveloperKey(api_key);
+          builder.build().setVisible(true);
         });
-      if (api_key) builder = builder.setDeveloperKey(api_key);
-      builder.build().setVisible(true);
+      },
     });
+    tokenClient.requestAccessToken({ prompt: "" });
   }
 
   async function handleAbort() {
