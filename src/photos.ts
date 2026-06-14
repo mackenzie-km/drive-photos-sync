@@ -12,7 +12,6 @@ const SUPPORTED_MIME_TYPES = new Set([
   "image/webp",
   "image/tiff",
   "image/bmp",
-  "image/raw",
 ]);
 
 async function getAccessToken(auth: OAuth2Client): Promise<string> {

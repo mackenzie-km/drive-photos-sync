@@ -97,6 +97,13 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
                 break;
             }
             try {
+                // Skip files too large to safely buffer and upload
+                const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200 MB
+                if (file.size && file.size > MAX_FILE_SIZE) {
+                    await (0, db_1.updateFileStatus)("skipped", null, "file too large", 0, file.id, userId);
+                    skipped++;
+                    continue;
+                }
                 // Dedup: if another file with the same md5 was already uploaded, skip
                 if (file.md5 && (await (0, db_1.getMd5Uploaded)(userId, file.md5))) {
                     await (0, db_1.updateFileStatus)("skipped", null, "duplicate md5", 0, file.id, userId);
