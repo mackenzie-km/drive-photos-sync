@@ -62,19 +62,20 @@ export default function MainPage() {
   const [folderName, setFolderName] = useState<string | null>(null);
   const [driveAccessToken, setDriveAccessToken] = useState<string | null>(null);
 
+  const pollStatus = () => {
+    fetch("/sync/status", { cache: "no-store" })
+      .then((r) => r.json())
+      .then(setSyncStatus)
+      .catch(() =>
+        setError(
+          "Unable to reach the server. Please try refreshing the page.",
+        ),
+      );
+  };
+
   useEffect(() => {
-    const poll = () => {
-      fetch("/sync/status")
-        .then((r) => r.json())
-        .then(setSyncStatus)
-        .catch(() =>
-          setError(
-            "Unable to reach the server. Please try refreshing the page.",
-          ),
-        );
-    };
-    poll();
-    const interval = setInterval(poll, 2000);
+    pollStatus();
+    const interval = setInterval(pollStatus, 2000);
     return () => clearInterval(interval);
   }, []);
 
@@ -102,6 +103,7 @@ export default function MainPage() {
         body: JSON.stringify({ useAI, folderId, driveAccessToken }),
       });
       if (res.ok) {
+        pollStatus();
         setSyncStatus((prev) =>
           prev
             ? {
@@ -137,19 +139,18 @@ export default function MainPage() {
         .setIncludeFolders(true)
         .setSelectFolderEnabled(true)
         .setMimeTypes("application/vnd.google-apps.folder");
-      new gp.PickerBuilder()
+      let builder = new gp.PickerBuilder()
         .addView(folderView)
         .setOAuthToken(access_token)
-        .setDeveloperKey(api_key)
         .setCallback((data: any) => {
           if (data.action === gp.Action.PICKED) {
             setFolderId(data.docs[0].id);
             setFolderName(data.docs[0].name);
             setDriveAccessToken(access_token);
           }
-        })
-        .build()
-        .setVisible(true);
+        });
+      if (api_key) builder = builder.setDeveloperKey(api_key);
+      builder.build().setVisible(true);
     });
   }
 
