@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 
-declare const google: any;
 
 interface SyncStatus {
   status:
@@ -52,8 +51,6 @@ const STATUS_LABEL: Record<string, string> = {
 const IS_RUNNING = (status: string) =>
   status === "discovering" || status === "uploading";
 
-const apiKey = import.meta.env.VITE_GOOGLE_API_KEY;
-const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
 export default function MainPage() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
@@ -130,41 +127,30 @@ export default function MainPage() {
     }
   }
 
-  function openPicker() {
-    // google variable comes from GIS script
-    const tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: clientId,
-      scope: "https://www.googleapis.com/auth/drive.file",
-      callback: (response: any) => {
-        const access_token = response.access_token;
+  async function openPicker() {
+    const res = await fetch("/picker/config");
+    const { access_token, api_key } = await res.json();
 
-        if (!access_token) {
-          console.error("No token returned");
-          return;
-        }
-        (window as any).gapi.load("picker", () => {
-          const gp = (window as any).google.picker;
-          const folderView = new gp.DocsView()
-            .setIncludeFolders(true)
-            .setSelectFolderEnabled(true)
-            .setMimeTypes("application/vnd.google-apps.folder");
-          const picker = new gp.PickerBuilder()
-            .addView(folderView)
-            .setOAuthToken(access_token)
-            .setDeveloperKey(apiKey)
-            .setCallback((data: any) => {
-              if (data.action === gp.Action.PICKED) {
-                setFolderId(data.docs[0].id);
-                setFolderName(data.docs[0].name);
-                setDriveAccessToken(access_token);
-              }
-            })
-            .build();
-          picker.setVisible(true);
-        });
-      },
+    (window as any).gapi.load("picker", () => {
+      const gp = (window as any).google.picker;
+      const folderView = new gp.DocsView()
+        .setIncludeFolders(true)
+        .setSelectFolderEnabled(true)
+        .setMimeTypes("application/vnd.google-apps.folder");
+      new gp.PickerBuilder()
+        .addView(folderView)
+        .setOAuthToken(access_token)
+        .setDeveloperKey(api_key)
+        .setCallback((data: any) => {
+          if (data.action === gp.Action.PICKED) {
+            setFolderId(data.docs[0].id);
+            setFolderName(data.docs[0].name);
+            setDriveAccessToken(access_token);
+          }
+        })
+        .build()
+        .setVisible(true);
     });
-    tokenClient.requestAccessToken();
   }
 
   async function handleAbort() {
