@@ -31,9 +31,17 @@ jest.mock("./db", () => ({
 
 import { startSync, requestAbort, getSyncState } from "./sync";
 import { generatePhotoDescription } from "./gemini";
-import { updateSyncRun, updateFileStatus, getMd5Uploaded } from "./db";
+import {
+  updateSyncRun,
+  updateFileStatus,
+  getMd5Uploaded,
+  getUninitializedFiles,
+  createSyncRun,
+  clearUninitializedFiles,
+  upsertDriveFile,
+  clearFailedFiles,
+} from "./db";
 import { listDrivePhotos } from "./drive";
-import { getUninitializedFiles } from "./db";
 
 const mockGeneratePhotoDescription = generatePhotoDescription as jest.Mock;
 const mockListDrivePhotos = listDrivePhotos as jest.Mock;
@@ -41,6 +49,10 @@ const mockGetUninitializedFiles = getUninitializedFiles as jest.Mock;
 const mockUpdateSyncRun = updateSyncRun as jest.Mock;
 const mockUpdateFileStatus = updateFileStatus as jest.Mock;
 const mockGetMd5Uploaded = getMd5Uploaded as jest.Mock;
+const mockCreateSyncRun = createSyncRun as jest.Mock;
+const mockClearUninitializedFiles = clearUninitializedFiles as jest.Mock;
+const mockUpsertDriveFile = upsertDriveFile as jest.Mock;
+const mockClearFailedFiles = clearFailedFiles as jest.Mock;
 
 // Polls until condition is true — used because runSync runs fire-and-forget.
 async function waitFor(condition: () => boolean, timeoutMs = 3000) {
@@ -119,6 +131,83 @@ describe("startSync — MD5 dedup", () => {
       expect.anything(),
       expect.anything(),
     );
+  });
+});
+
+describe("startSync — concurrent guard", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockListDrivePhotos.mockImplementation(async function* () {});
+    mockGetUninitializedFiles.mockResolvedValue([]);
+  });
+
+  it("rejects a second startSync before the first has resolved", async () => {
+    const p1 = startSync("user-concurrent", true, "folder-1");
+    await expect(startSync("user-concurrent", true, "folder-1")).rejects.toThrow(
+      "A sync is already running",
+    );
+    await p1;
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+  });
+});
+
+describe("startSync — abort + restart", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockListDrivePhotos.mockImplementation(async function* () {});
+    mockGetUninitializedFiles.mockResolvedValue([]);
+  });
+
+  it("does not overwrite new sync state when the aborted run finishes", async () => {
+    mockCreateSyncRun.mockResolvedValueOnce(1).mockResolvedValueOnce(2);
+
+    await startSync("user-abort-restart", true, "folder-1");
+    requestAbort("user-abort-restart");
+    await startSync("user-abort-restart", true, "folder-1");
+
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length >= 2);
+
+    expect(getSyncState("user-abort-restart").status).toBe("done");
+  });
+});
+
+describe("startSync — folderId plumbing", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockListDrivePhotos.mockImplementation(async function* () {
+      yield { id: "file-1", name: "photo.jpg", md5: "abc", mime_type: "image/jpeg", size: 1024 };
+    });
+    mockGetUninitializedFiles.mockResolvedValue([]);
+  });
+
+  it("passes folderId to clearUninitializedFiles at sync start", async () => {
+    await startSync("user-folder", true, "folder-xyz");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockClearUninitializedFiles).toHaveBeenCalledWith("user-folder", "folder-xyz");
+  });
+
+  it("passes folderId to upsertDriveFile during discovery", async () => {
+    await startSync("user-folder", true, "folder-xyz");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockUpsertDriveFile).toHaveBeenCalledWith(
+      "file-1", "user-folder", "folder-xyz", "photo.jpg", "abc", "image/jpeg", 1024,
+    );
+  });
+
+  it("passes folderId to getUninitializedFiles during upload", async () => {
+    await startSync("user-folder", true, "folder-xyz");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockGetUninitializedFiles).toHaveBeenCalledWith("user-folder", "folder-xyz");
+  });
+
+  it("does not call clearFailedFiles", async () => {
+    await startSync("user-folder", true, "folder-xyz");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockClearFailedFiles).not.toHaveBeenCalled();
   });
 });
 

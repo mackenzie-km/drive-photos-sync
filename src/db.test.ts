@@ -5,7 +5,81 @@ jest.mock("pg", () => ({
   Pool: jest.fn().mockImplementation(() => ({ query: mockQuery })),
 }));
 
-import { resetStuckFiles } from "./db";
+import {
+  resetStuckFiles,
+  upsertDriveFile,
+  getUninitializedFiles,
+  clearUninitializedFiles,
+  clearFailedFiles,
+} from "./db";
+
+describe("upsertDriveFile", () => {
+  beforeEach(() => mockQuery.mockClear());
+
+  it("inserts folder_id into the row", async () => {
+    await upsertDriveFile("file-1", "user-1", "folder-1", "photo.jpg", "abc123", "image/jpeg", 1024);
+
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toContain("folder_id");
+    expect(params).toContain("folder-1");
+  });
+
+  it("updates folder_id on conflict when status is uninitialized", async () => {
+    await upsertDriveFile("file-1", "user-1", "folder-1", "photo.jpg", "abc123", "image/jpeg", 1024);
+
+    const [sql] = mockQuery.mock.calls[0];
+    expect(sql).toContain("ON CONFLICT");
+    expect(sql).toContain("folder_id");
+    expect(sql).toContain("status = 'uninitialized'");
+  });
+});
+
+describe("getUninitializedFiles", () => {
+  beforeEach(() => mockQuery.mockClear());
+
+  it("scopes the query to the given folderId", async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+    await getUninitializedFiles("user-1", "folder-abc");
+
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toContain("folder_id");
+    expect(params).toContain("folder-abc");
+  });
+
+  it("includes failed files with retry_count below the limit", async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+    await getUninitializedFiles("user-1", "folder-abc");
+
+    const [sql] = mockQuery.mock.calls[0];
+    expect(sql).toContain("retry_count < 3");
+  });
+});
+
+describe("clearUninitializedFiles", () => {
+  beforeEach(() => mockQuery.mockClear());
+
+  it("deletes only uninitialized files for the given folder", async () => {
+    await clearUninitializedFiles("user-1", "folder-abc");
+
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toContain("folder_id");
+    expect(sql).toContain("status = 'uninitialized'");
+    expect(params).toEqual(["user-1", "folder-abc"]);
+  });
+});
+
+describe("clearFailedFiles", () => {
+  beforeEach(() => mockQuery.mockClear());
+
+  it("deletes only failed files for the given folder", async () => {
+    await clearFailedFiles("user-1", "folder-abc");
+
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toContain("folder_id");
+    expect(sql).toContain("status = 'failed'");
+    expect(params).toEqual(["user-1", "folder-abc"]);
+  });
+});
 
 describe("resetStuckFiles", () => {
   beforeEach(() => {

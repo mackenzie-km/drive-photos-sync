@@ -26,6 +26,7 @@ export async function initDb() {
     CREATE TABLE IF NOT EXISTS drive_files (
       id                TEXT NOT NULL,
       user_id           TEXT NOT NULL,
+      folder_id         TEXT,
       name              TEXT NOT NULL,
       md5               TEXT,
       mime_type         TEXT NOT NULL,
@@ -40,8 +41,11 @@ export async function initDb() {
       PRIMARY KEY (id, user_id)
     );
 
+    ALTER TABLE drive_files ADD COLUMN IF NOT EXISTS folder_id TEXT;
+
     CREATE INDEX IF NOT EXISTS idx_drive_files_status ON drive_files(user_id, status);
     CREATE INDEX IF NOT EXISTS idx_drive_files_md5    ON drive_files(user_id, md5);
+    CREATE INDEX IF NOT EXISTS idx_drive_files_folder ON drive_files(user_id, folder_id, status);
 
     CREATE TABLE IF NOT EXISTS sync_runs (
       id           SERIAL PRIMARY KEY,
@@ -86,21 +90,23 @@ export async function getTokens(userId: string) {
 export async function upsertDriveFile(
   id: string,
   userId: string,
+  folderId: string,
   name: string,
   md5: string | null,
   mimeType: string,
   size: number | null,
 ) {
   await query(
-    `INSERT INTO drive_files (id, user_id, name, md5, mime_type, size)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO drive_files (id, user_id, folder_id, name, md5, mime_type, size)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (id, user_id) DO UPDATE SET
-       name      = $3,
-       md5       = $4,
-       mime_type = $5,
-       size      = $6
+       folder_id = $3,
+       name      = $4,
+       md5       = $5,
+       mime_type = $6,
+       size      = $7
      WHERE drive_files.status = 'uninitialized'`,
-    [id, userId, name, md5, mimeType, size],
+    [id, userId, folderId, name, md5, mimeType, size],
   );
 }
 
@@ -152,30 +158,31 @@ export async function resetStuckFiles(userId: string) {
   );
 }
 
-// Clear failed files at the start of each sync so stale failures don't carry over
-export async function clearFailedFiles(userId: string) {
+// Clear permanently failed files for a folder (called explicitly, not at sync start)
+export async function clearFailedFiles(userId: string, folderId: string) {
   await query(
-    `DELETE FROM drive_files WHERE user_id = $1 AND status = 'failed'`,
-    [userId],
+    `DELETE FROM drive_files WHERE user_id = $1 AND folder_id = $2 AND status = 'failed'`,
+    [userId, folderId],
   );
 }
 
-// Clear uninitialized files before each sync so discovery re-populates them
-// up to the current limit — prevents stale counts from prior runs skewing the UI.
-export async function clearUninitializedFiles(userId: string) {
+// Clear uninitialized files for this folder before discovery re-populates them
+export async function clearUninitializedFiles(userId: string, folderId: string) {
   await query(
-    `DELETE FROM drive_files WHERE user_id = $1 AND status = 'uninitialized'`,
-    [userId],
+    `DELETE FROM drive_files WHERE user_id = $1 AND folder_id = $2 AND status = 'uninitialized'`,
+    [userId, folderId],
   );
 }
 
-// Pick up both fresh uninitialized files and failed files that haven't exceeded the retry limit
-export async function getUninitializedFiles(userId: string) {
+// Pick up uninitialized files and failed files that haven't exceeded the retry limit,
+// scoped to the current folder so cross-folder failures don't bleed in.
+export async function getUninitializedFiles(userId: string, folderId: string) {
   const result = await query(
     `SELECT * FROM drive_files
-     WHERE user_id = $1 AND (status = 'uninitialized' OR (status = 'failed' AND retry_count < 3))
+     WHERE user_id = $1 AND folder_id = $2
+       AND (status = 'uninitialized' OR (status = 'failed' AND retry_count < 3))
      LIMIT 50`,
-    [userId],
+    [userId, folderId],
   );
   return result.rows;
 }

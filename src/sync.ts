@@ -10,7 +10,6 @@ import {
   markFileInProgress,
   updateFileStatus,
   resetStuckFiles,
-  clearFailedFiles,
   clearUninitializedFiles,
   createSyncRun,
   updateSyncRun,
@@ -66,14 +65,22 @@ export async function startSync(
     throw new Error("A sync is already running");
   }
 
-  const runId = await createSyncRun(userId);
-
   userSyncState.set(userId, {
-    runId,
+    runId: -1,
     status: "discovering",
     shouldAbort: false,
     currentFile: null,
   });
+
+  let runId: number;
+  try {
+    runId = await createSyncRun(userId);
+  } catch (err) {
+    userSyncState.delete(userId);
+    throw err;
+  }
+
+  userSyncState.get(userId)!.runId = runId;
 
   // Fire and forget — progress is tracked in the DB and queryable via /sync/status
   runSync(userId, runId, useAI, folderId, driveAccessToken).catch((err) => {
@@ -98,8 +105,7 @@ async function runSync(
   const state = userSyncState.get(userId)!;
 
   await resetStuckFiles(userId);
-  await clearFailedFiles(userId);
-  await clearUninitializedFiles(userId);
+  await clearUninitializedFiles(userId, folderId);
 
   // Cap per sync run — only applies when AI is on (Gemini adds time per file)
   const MAX_PER_SYNC = useAI ? 10_000 : 20_000;
@@ -121,6 +127,7 @@ async function runSync(
     await upsertDriveFile(
       file.id,
       userId,
+      folderId,
       file.name,
       file.md5,
       file.mime_type,
@@ -147,7 +154,7 @@ async function runSync(
     failed = 0;
 
   while (!state.shouldAbort && !limitReached) {
-    const batch = await getUninitializedFiles(userId);
+    const batch = await getUninitializedFiles(userId, folderId);
     if (batch.length === 0) {
       console.log(`[sync:${userId}] 0 uninitialized files remaining.`);
       break;
@@ -163,7 +170,14 @@ async function runSync(
         // Skip files too large to safely buffer and upload
         const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200 MB
         if (file.size && file.size > MAX_FILE_SIZE) {
-          await updateFileStatus("skipped", null, "file too large", 0, file.id, userId);
+          await updateFileStatus(
+            "skipped",
+            null,
+            "file too large",
+            0,
+            file.id,
+            userId,
+          );
           skipped++;
           continue;
         }
@@ -245,7 +259,9 @@ function finishRun(
   failed: number,
 ) {
   const state = userSyncState.get(userId);
-  if (state) state.status = status;
+  // Guard on runId: if the user aborted and immediately re-started, state now
+  // belongs to the new sync — don't overwrite it with this run's terminal status.
+  if (state && state.runId === runId) state.status = status;
   updateSyncRun(
     status,
     total,

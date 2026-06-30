@@ -28,34 +28,39 @@ function requestAbort(userId) {
         userSyncState.delete(userId);
     }
 }
-async function startSync(userId, useAI, folderId, driveAccessToken) {
+async function startSync(userId, useAI, folderId) {
     const existing = userSyncState.get(userId);
     if (existing?.status === "discovering" || existing?.status === "uploading") {
         throw new Error("A sync is already running");
     }
-    const runId = await (0, db_1.createSyncRun)(userId);
     userSyncState.set(userId, {
-        runId,
+        runId: -1,
         status: "discovering",
         shouldAbort: false,
         currentFile: null,
     });
+    let runId;
+    try {
+        runId = await (0, db_1.createSyncRun)(userId);
+    }
+    catch (err) {
+        userSyncState.delete(userId);
+        throw err;
+    }
+    userSyncState.get(userId).runId = runId;
     // Fire and forget — progress is tracked in the DB and queryable via /sync/status
-    runSync(userId, runId, useAI, folderId, driveAccessToken).catch((err) => {
+    runSync(userId, runId, useAI, folderId).catch((err) => {
         console.error("[sync] fatal error:", err.message);
         finishRun(userId, runId, "failed", 0, 0, 0, 0);
     });
     return runId;
 }
-async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
-    const driveAuth = driveAccessToken
-        ? (0, auth_1.createClientFromToken)(driveAccessToken)
-        : await (0, auth_1.getAuthClient)(userId);
+async function runSync(userId, runId, useAI, folderId) {
+    const driveAuth = await (0, auth_1.getAuthClient)(userId);
     const photosAuth = await (0, auth_1.getAuthClient)(userId);
     const state = userSyncState.get(userId);
     await (0, db_1.resetStuckFiles)(userId);
-    await (0, db_1.clearFailedFiles)(userId);
-    await (0, db_1.clearUninitializedFiles)(userId);
+    await (0, db_1.clearUninitializedFiles)(userId, folderId);
     // Cap per sync run — only applies when AI is on (Gemini adds time per file)
     const MAX_PER_SYNC = useAI ? 10_000 : 20_000;
     // ── Phase 1: discover ──────────────────────────────────────────────────────
@@ -70,7 +75,7 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
             limitReached = true;
             break;
         }
-        await (0, db_1.upsertDriveFile)(file.id, userId, file.name, file.md5, file.mime_type, file.size);
+        await (0, db_1.upsertDriveFile)(file.id, userId, folderId, file.name, file.md5, file.mime_type, file.size);
         discovered++;
         if (discovered % 500 === 0)
             console.log(`[sync:${userId}]   ${discovered} files found so far...`);
@@ -84,7 +89,7 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
     console.log(`[sync:${userId}] Phase 2: Preparing to upload photos.`);
     let uploaded = 0, skipped = 0, failed = 0;
     while (!state.shouldAbort && !limitReached) {
-        const batch = await (0, db_1.getUninitializedFiles)(userId);
+        const batch = await (0, db_1.getUninitializedFiles)(userId, folderId);
         if (batch.length === 0) {
             console.log(`[sync:${userId}] 0 uninitialized files remaining.`);
             break;
@@ -143,7 +148,9 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
 }
 function finishRun(userId, runId, status, total, uploaded, skipped, failed) {
     const state = userSyncState.get(userId);
-    if (state)
+    // Guard on runId: if the user aborted and immediately re-started, state now
+    // belongs to the new sync — don't overwrite it with this run's terminal status.
+    if (state && state.runId === runId)
         state.status = status;
     (0, db_1.updateSyncRun)(status, total, uploaded, skipped, failed, Math.floor(Date.now() / 1000), runId, userId).catch((err) => console.error("[sync] failed to update sync run:", err));
 }
