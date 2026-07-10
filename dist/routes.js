@@ -58,7 +58,6 @@ function requireAuth(req, res, next) {
     next();
 }
 // ── Sync ──────────────────────────────────────────────────────────────────────
-const SYNC_TIMEOUT_SECS = 3 * 60 * 60; // 3 hours
 router.post("/sync/start", requireAuth, async (req, res) => {
     try {
         const useAI = req.body?.useAI !== false; // default true
@@ -83,23 +82,28 @@ router.post("/sync/abort", requireAuth, (req, res) => {
 });
 router.get("/sync/status", requireAuth, async (req, res) => {
     const userId = req.userId;
-    const state = (0, sync_1.getSyncState)(userId);
-    const latestRun = await (0, db_1.getLatestSyncRun)(userId);
-    const countsRaw = await (0, db_1.getFileCounts)(userId);
-    const fileCounts = Object.fromEntries(countsRaw.map((r) => [r.status, r.count]));
-    // - No active in-memory sync (e.g. server restart) → show error
-    // - Active sync but exceeded 3-hour timeout → request abort, show error
-    if (latestRun?.status === "running") {
-        const noActiveSync = state.status === "idle";
-        const isStale = Math.floor(Date.now() / 1000) - latestRun.started_at > SYNC_TIMEOUT_SECS;
-        if (noActiveSync || isStale) {
-            if (isStale && !noActiveSync)
-                (0, sync_1.requestAbort)(userId);
-            latestRun.status = "failed";
-            latestRun.error = "Sync was interrupted. Start a new sync to resume.";
-        }
-    }
-    res.json({ ...state, latestRun: latestRun ?? null, fileCounts });
+    res.json(await (0, sync_1.getSyncSnapshot)(userId));
+});
+// SSE stream — replaces polling /sync/status every 2s. Sends a full snapshot
+// immediately on connect (including reconnects), then incremental pushes as
+// runSync progresses. Same-origin in both dev (Vite proxy) and prod (Vercel
+// rewrite), so no CORS/withCredentials changes are needed for EventSource.
+router.get("/sync/events", requireAuth, (req, res) => {
+    const userId = req.userId;
+    res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+    });
+    res.flushHeaders();
+    (0, sync_1.addSyncClient)(userId, res);
+    (0, sync_1.pushSnapshot)(userId, [res]);
+    const heartbeat = setInterval(() => res.write(":\n\n"), 15000);
+    req.on("close", () => {
+        clearInterval(heartbeat);
+        (0, sync_1.removeSyncClient)(userId, res);
+    });
 });
 router.get("/sync/files", requireAuth, async (req, res) => {
     const files = await (0, db_1.getUploadedFiles)(req.userId);

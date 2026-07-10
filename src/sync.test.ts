@@ -27,9 +27,16 @@ jest.mock("./db", () => ({
   updateSyncRun: jest.fn().mockResolvedValue(undefined),
   getFileCounts: jest.fn().mockResolvedValue([]),
   getMd5Uploaded: jest.fn().mockResolvedValue(null),
+  getLatestSyncRun: jest.fn().mockResolvedValue(null),
 }));
 
-import { startSync, requestAbort, getSyncState } from "./sync";
+import {
+  startSync,
+  requestAbort,
+  getSyncState,
+  getSyncSnapshot,
+  addSyncClient,
+} from "./sync";
 import { generatePhotoDescription } from "./gemini";
 import {
   updateSyncRun,
@@ -40,6 +47,8 @@ import {
   clearUninitializedFiles,
   upsertDriveFile,
   clearFailedFiles,
+  getLatestSyncRun,
+  getFileCounts,
 } from "./db";
 import { listDrivePhotos, downloadDriveFile } from "./drive";
 import { uploadPhoto } from "./photos";
@@ -72,6 +81,45 @@ const FILE = {
   mime_type: "image/jpeg",
   retry_count: 0,
 };
+
+describe("getSyncSnapshot — stale run correction", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const mockGetLatestSyncRun = getLatestSyncRun as jest.Mock;
+
+  beforeEach(() => {
+    mockListDrivePhotos.mockImplementation(async function* () {});
+    mockGetUninitializedFiles.mockResolvedValue([]);
+  });
+
+  it("marks a running run as failed when there is no active in-memory sync", async () => {
+    mockGetLatestSyncRun.mockResolvedValue({ status: "running", started_at: now - 60 });
+
+    const snapshot = await getSyncSnapshot("user-snapshot-idle");
+    expect(snapshot.latestRun.status).toBe("failed");
+  });
+
+  it("marks a running run as failed and aborts when it has exceeded the 3-hour timeout", async () => {
+    await startSync("user-snapshot-stale", true, "folder-x");
+    mockGetLatestSyncRun.mockResolvedValue({
+      status: "running",
+      started_at: now - 4 * 60 * 60,
+    });
+
+    const snapshot = await getSyncSnapshot("user-snapshot-stale");
+    expect(snapshot.latestRun.status).toBe("failed");
+    // requestAbort deletes the in-memory state entry — confirms the timeout
+    // branch actually fired, not just that latestRun.status got overwritten.
+    expect(getSyncState("user-snapshot-stale").status).toBe("idle");
+  });
+
+  it("leaves a running run alone when a sync is active and within the timeout", async () => {
+    await startSync("user-snapshot-active", true, "folder-x");
+    mockGetLatestSyncRun.mockResolvedValue({ status: "running", started_at: now - 60 });
+
+    const snapshot = await getSyncSnapshot("user-snapshot-active");
+    expect(snapshot.latestRun.status).toBe("running");
+  });
+});
 
 describe("requestAbort", () => {
   beforeEach(() => {
@@ -458,5 +506,49 @@ describe("startSync — limit_reached", () => {
       expect.any(Number),
       "user-limit-upload",
     );
+  });
+});
+
+describe("startSync — crash mid-sync (SSE terminal push)", () => {
+  const mockGetFileCounts = getFileCounts as jest.Mock;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("pushes real drive_files counts over SSE, not the hardcoded-zero crash args", async () => {
+    // Simulates an expired driveAccessToken partway through discovery:
+    // listDrivePhotos throws after one file is found, rejecting runSync and
+    // routing through startSync's fire-and-forget .catch(), which calls
+    // finishRun(userId, runId, "failed", 0, 0, 0, 0) — args with no relation
+    // to what was actually discovered.
+    mockListDrivePhotos.mockImplementation(async function* () {
+      yield {
+        id: "file-1",
+        name: "photo1.jpg",
+        md5: "abc",
+        mime_type: "image/jpeg",
+        size: 1024,
+      };
+      throw new Error("token expired");
+    });
+
+    // What a live query against drive_files would actually return after that
+    // partial discovery — independent of finishRun's zeroed-out args.
+    mockGetFileCounts.mockResolvedValue([{ status: "uninitialized", count: 1 }]);
+
+    const fakeClient = { write: jest.fn() };
+    addSyncClient("user-crash-1", fakeClient as any);
+
+    await startSync("user-crash-1", true, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+    await waitFor(() => fakeClient.write.mock.calls.length > 0);
+
+    const lastFrame =
+      fakeClient.write.mock.calls[fakeClient.write.mock.calls.length - 1][0];
+    const payload = JSON.parse(lastFrame.replace(/^data: /, "").trim());
+
+    expect(payload.status).toBe("failed");
+    expect(payload.fileCounts).toEqual({ uninitialized: 1 });
   });
 });

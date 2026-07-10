@@ -6,15 +6,14 @@ jest.mock("./auth", () => ({
 
 jest.mock("./sync", () => ({
   startSync: jest.fn(),
-  getSyncState: jest
-    .fn()
-    .mockReturnValue({ status: "idle", currentFile: null, runId: null }),
   requestAbort: jest.fn(),
+  getSyncSnapshot: jest.fn(),
+  addSyncClient: jest.fn(),
+  removeSyncClient: jest.fn(),
+  pushSnapshot: jest.fn(),
 }));
 
 jest.mock("./db", () => ({
-  getLatestSyncRun: jest.fn().mockResolvedValue(null),
-  getFileCounts: jest.fn().mockResolvedValue([]),
   getUploadedFiles: jest.fn().mockResolvedValue([]),
 }));
 
@@ -23,13 +22,11 @@ import session from "express-session";
 import request from "supertest";
 import routes from "./routes";
 import { handleCallback } from "./auth";
-import { startSync, getSyncState, requestAbort } from "./sync";
-import { getLatestSyncRun } from "./db";
+import { startSync, requestAbort, getSyncSnapshot } from "./sync";
 
 const mockHandleCallback = handleCallback as jest.Mock;
 const mockStartSync = startSync as jest.Mock;
-const mockGetSyncState = getSyncState as jest.Mock;
-const mockGetLatestSyncRun = getLatestSyncRun as jest.Mock;
+const mockGetSyncSnapshot = getSyncSnapshot as jest.Mock;
 const mockRequestAbort = requestAbort as jest.Mock;
 
 // Creates a minimal Express app with session middleware.
@@ -61,39 +58,26 @@ describe("POST /sync/start", () => {
   });
 });
 
-describe("GET /sync/status — stale run correction", () => {
-  const now = Math.floor(Date.now() / 1000);
-
+// The stale-run correction logic itself now lives in sync.ts's
+// getSyncSnapshot (tested directly in sync.test.ts). This just confirms the
+// route is a thin pass-through.
+describe("GET /sync/status", () => {
   beforeEach(() => jest.clearAllMocks());
 
-  it("marks a running run as failed when there is no active in-memory sync", async () => {
-    mockGetSyncState.mockReturnValue({ status: "idle", currentFile: null, runId: null });
-    mockGetLatestSyncRun.mockResolvedValue({ status: "running", started_at: now - 60 });
+  it("returns whatever getSyncSnapshot resolves for the authenticated user", async () => {
+    const snapshot = {
+      status: "idle",
+      currentFile: null,
+      runId: null,
+      latestRun: { status: "failed", error: "Sync was interrupted." },
+      fileCounts: {},
+    };
+    mockGetSyncSnapshot.mockResolvedValue(snapshot);
 
     const res = await request(createApp("user-123")).get("/sync/status");
     expect(res.status).toBe(200);
-    expect(res.body.latestRun.status).toBe("failed");
-    expect(mockRequestAbort).not.toHaveBeenCalled();
-  });
-
-  it("marks a running run as failed and aborts when it has exceeded the 3-hour timeout", async () => {
-    mockGetSyncState.mockReturnValue({ status: "uploading", currentFile: null, runId: 1 });
-    mockGetLatestSyncRun.mockResolvedValue({ status: "running", started_at: now - 4 * 60 * 60 });
-
-    const res = await request(createApp("user-123")).get("/sync/status");
-    expect(res.status).toBe(200);
-    expect(res.body.latestRun.status).toBe("failed");
-    expect(mockRequestAbort).toHaveBeenCalledWith("user-123");
-  });
-
-  it("leaves a running run alone when a sync is active and within the timeout", async () => {
-    mockGetSyncState.mockReturnValue({ status: "uploading", currentFile: "photo.jpg", runId: 1 });
-    mockGetLatestSyncRun.mockResolvedValue({ status: "running", started_at: now - 60 });
-
-    const res = await request(createApp("user-123")).get("/sync/status");
-    expect(res.status).toBe(200);
-    expect(res.body.latestRun.status).toBe("running");
-    expect(mockRequestAbort).not.toHaveBeenCalled();
+    expect(res.body).toEqual(snapshot);
+    expect(mockGetSyncSnapshot).toHaveBeenCalledWith("user-123");
   });
 });
 

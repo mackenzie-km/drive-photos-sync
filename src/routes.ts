@@ -1,7 +1,14 @@
 import { Router, Request, Response } from "express";
 import { getAuthUrl, handleCallback, getAuthClient } from "./auth";
-import { startSync, getSyncState, requestAbort } from "./sync";
-import { getLatestSyncRun, getFileCounts, getUploadedFiles, query } from "./db";
+import {
+  startSync,
+  requestAbort,
+  getSyncSnapshot,
+  addSyncClient,
+  removeSyncClient,
+  pushSnapshot,
+} from "./sync";
+import { getUploadedFiles } from "./db";
 
 const router = Router();
 
@@ -63,7 +70,6 @@ function requireAuth(req: Request, res: Response, next: Function) {
 }
 
 // ── Sync ──────────────────────────────────────────────────────────────────────
-const SYNC_TIMEOUT_SECS = 3 * 60 * 60; // 3 hours
 
 router.post("/sync/start", requireAuth, async (req: Request, res: Response) => {
   try {
@@ -90,27 +96,32 @@ router.post("/sync/abort", requireAuth, (req: Request, res: Response) => {
 
 router.get("/sync/status", requireAuth, async (req: Request, res: Response) => {
   const userId = (req as any).userId;
-  const state = getSyncState(userId);
-  const latestRun = await getLatestSyncRun(userId);
-  const countsRaw = await getFileCounts(userId);
-  const fileCounts = Object.fromEntries(
-    countsRaw.map((r) => [r.status, r.count]),
-  );
+  res.json(await getSyncSnapshot(userId));
+});
 
-  // - No active in-memory sync (e.g. server restart) → show error
-  // - Active sync but exceeded 3-hour timeout → request abort, show error
-  if (latestRun?.status === "running") {
-    const noActiveSync = state.status === "idle";
-    const isStale =
-      Math.floor(Date.now() / 1000) - latestRun.started_at > SYNC_TIMEOUT_SECS;
-    if (noActiveSync || isStale) {
-      if (isStale && !noActiveSync) requestAbort(userId);
-      latestRun.status = "failed";
-      latestRun.error = "Sync was interrupted. Start a new sync to resume.";
-    }
-  }
+// SSE stream — replaces polling /sync/status every 2s. Sends a full snapshot
+// immediately on connect (including reconnects), then incremental pushes as
+// runSync progresses. Same-origin in both dev (Vite proxy) and prod (Vercel
+// rewrite), so no CORS/withCredentials changes are needed for EventSource.
+router.get("/sync/events", requireAuth, (req: Request, res: Response) => {
+  const userId = (req as any).userId;
 
-  res.json({ ...state, latestRun: latestRun ?? null, fileCounts });
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  res.flushHeaders();
+
+  addSyncClient(userId, res);
+  pushSnapshot(userId, [res]);
+
+  const heartbeat = setInterval(() => res.write(":\n\n"), 15000);
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    removeSyncClient(userId, res);
+  });
 });
 
 router.get("/sync/files", requireAuth, async (req: Request, res: Response) => {

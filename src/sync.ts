@@ -1,3 +1,4 @@
+import type { Response } from "express";
 import { withRetry } from "./retry";
 import { getAuthClient, createClientFromToken } from "./auth";
 import { Readable } from "stream";
@@ -14,7 +15,11 @@ import {
   createSyncRun,
   updateSyncRun,
   getMd5Uploaded,
+  getLatestSyncRun,
+  getFileCounts,
 } from "./db";
+
+const SYNC_TIMEOUT_SECS = 3 * 60 * 60; // 3 hours — mirrors routes.ts's stale-run check
 
 type SyncStatus =
   | "idle"
@@ -52,6 +57,84 @@ export function requestAbort(userId: string) {
     // Resets state so user can re-run
     userSyncState.delete(userId);
   }
+}
+
+// Full snapshot — same shape /sync/status has always returned, including the
+// crash-recovery correction (no in-memory state, or a run stuck past the
+// timeout, gets reported as failed). Used for the one-shot REST endpoint and
+// for the first message sent on every new/reconnected SSE connection.
+export async function getSyncSnapshot(userId: string) {
+  const state = getSyncState(userId);
+  const latestRun = await getLatestSyncRun(userId);
+  const countsRaw = await getFileCounts(userId);
+  const fileCounts = Object.fromEntries(
+    countsRaw.map((r) => [r.status, r.count]),
+  );
+
+  if (latestRun?.status === "running") {
+    const noActiveSync = state.status === "idle";
+    const isStale =
+      Math.floor(Date.now() / 1000) - latestRun.started_at > SYNC_TIMEOUT_SECS;
+    if (noActiveSync || isStale) {
+      if (isStale && !noActiveSync) requestAbort(userId);
+      latestRun.status = "failed";
+      latestRun.error = "Sync was interrupted. Start a new sync to resume.";
+    }
+  }
+
+  return { ...state, latestRun: latestRun ?? null, fileCounts };
+}
+
+// ── SSE ───────────────────────────────────────────────────────────────────────
+// Per-user set of open SSE connections. In-memory, single-process — a sync
+// running on one Node instance won't push to a browser connected to another
+// instance if this is ever scaled horizontally. Not fixing that here.
+const userSyncClients = new Map<string, Set<Response>>();
+
+export function addSyncClient(userId: string, res: Response) {
+  if (!userSyncClients.has(userId)) userSyncClients.set(userId, new Set());
+  userSyncClients.get(userId)!.add(res);
+}
+
+export function removeSyncClient(userId: string, res: Response) {
+  userSyncClients.get(userId)?.delete(res);
+}
+
+// DB-backed snapshot push — used once per new connection and at phase
+// transitions/finish, never in the hot per-file loop (see pushProgress).
+export async function pushSnapshot(userId: string, targets?: Response[]) {
+  const clients = targets ?? [...(userSyncClients.get(userId) ?? [])];
+  if (clients.length === 0) return;
+  const payload = JSON.stringify(await getSyncSnapshot(userId));
+  for (const res of clients) res.write(`data: ${payload}\n\n`);
+}
+
+// Local-state-only push for the per-file hot path. uploaded/skipped/failed
+// come from runSync's own closure counters — no DB round trip — so this is
+// cheap enough to call on every file without throttling.
+function pushProgress(
+  userId: string,
+  discovered: number,
+  uploaded: number,
+  skipped: number,
+  failed: number,
+) {
+  const clients = userSyncClients.get(userId);
+  if (!clients || clients.size === 0) return;
+  const state = userSyncState.get(userId);
+  if (!state) return;
+  const payload = JSON.stringify({
+    runId: state.runId,
+    status: state.status,
+    currentFile: state.currentFile,
+    fileCounts: {
+      uploaded,
+      skipped,
+      failed,
+      uninitialized: discovered - uploaded - skipped - failed,
+    },
+  });
+  for (const res of clients) res.write(`data: ${payload}\n\n`);
 }
 
 export async function startSync(
@@ -114,6 +197,7 @@ async function runSync(
   let discovered = 0;
   let limitReached = false;
   state.status = "discovering";
+  pushSnapshot(userId);
   console.log(
     `[sync:${userId}] Phase 1: discovering Drive photos in folder ${folderId}...`,
   );
@@ -134,6 +218,7 @@ async function runSync(
       file.size,
     );
     discovered++;
+    pushProgress(userId, discovered, 0, 0, 0);
     if (discovered % 500 === 0)
       console.log(`[sync:${userId}]   ${discovered} files found so far...`);
   }
@@ -148,6 +233,7 @@ async function runSync(
 
   // ── Phase 2: upload ────────────────────────────────────────────────────────
   state.status = "uploading";
+  pushSnapshot(userId);
   console.log(`[sync:${userId}] Phase 2: Preparing to upload photos.`);
   let uploaded = 0,
     skipped = 0,
@@ -179,6 +265,7 @@ async function runSync(
             userId,
           );
           skipped++;
+          pushProgress(userId, discovered, uploaded, skipped, failed);
           continue;
         }
 
@@ -193,6 +280,7 @@ async function runSync(
             userId,
           );
           skipped++;
+          pushProgress(userId, discovered, uploaded, skipped, failed);
           continue;
         }
 
@@ -215,6 +303,7 @@ async function runSync(
         );
         await updateFileStatus("uploaded", mediaId, null, 0, file.id, userId);
         uploaded++;
+        pushProgress(userId, discovered, uploaded, skipped, failed);
         console.log(`[sync:${userId}]   ✓ ${file.name} (${uploaded} uploaded)`);
       } catch (err: any) {
         const reason = err.response?.data?.error?.errors?.[0]?.reason;
@@ -230,6 +319,7 @@ async function runSync(
         }
         await updateFileStatus("failed", null, detail, 1, file.id, userId);
         failed++;
+        pushProgress(userId, discovered, uploaded, skipped, failed);
       }
     }
   }
@@ -262,6 +352,32 @@ function finishRun(
   // Guard on runId: if the user aborted and immediately re-started, state now
   // belongs to the new sync — don't overwrite it with this run's terminal status.
   if (state && state.runId === runId) state.status = status;
+
+  // Terminal push queries drive_files for real, rather than trusting this
+  // function's own args — startSync's fire-and-forget catch handler calls
+  // finishRun(..., "failed", 0, 0, 0, 0) when runSync throws mid-sync (e.g. an
+  // expired driveAccessToken partway through discovery), since it has no
+  // access to runSync's real closure counters. Building the payload from
+  // those args would broadcast all-zero counts even though drive_files
+  // genuinely has rows from whatever was discovered/uploaded before the
+  // failure. One query, once per finished run — not the per-file hot path.
+  const clients = userSyncClients.get(userId);
+  if (clients && clients.size > 0) {
+    getFileCounts(userId)
+      .then((countsRaw) => {
+        const payload = JSON.stringify({
+          runId,
+          status,
+          currentFile: null,
+          fileCounts: Object.fromEntries(
+            countsRaw.map((r) => [r.status, r.count]),
+          ),
+        });
+        for (const res of clients) res.write(`data: ${payload}\n\n`);
+      })
+      .catch((err) => console.error("[sync] failed to push terminal update:", err));
+  }
+
   updateSyncRun(
     status,
     total,
