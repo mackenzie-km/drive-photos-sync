@@ -77,29 +77,38 @@ async function pushSnapshot(userId, targets) {
     for (const res of clients)
         res.write(`data: ${payload}\n\n`);
 }
-// Local-state-only push for the per-file hot path. uploaded/skipped/failed
-// come from runSync's own closure counters — no DB round trip — so this is
-// cheap enough to call on every file without throttling.
-function pushProgress(userId, discovered, uploaded, skipped, failed) {
+// Per-file hot-path push, throttled to ~1/sec. fileCounts has always meant
+// "all-time totals across all folders for this user" (getFileCounts is not
+// scoped to a run or folder) — the same as pushSnapshot's DB-backed numbers.
+// A version of this that built fileCounts from runSync's local closure
+// counters (uploaded-this-run, starting at 0) looked cheaper but was wrong:
+// it overwrote the real cumulative "uploaded" total with 0 the instant
+// discovery started. Querying the DB here, throttled, keeps the numbers
+// truthful at a bounded cost (at most 1 query/sec per actively-watched sync).
+const lastProgressPushAt = new Map();
+function pushProgress(userId) {
     const clients = userSyncClients.get(userId);
     if (!clients || clients.size === 0)
         return;
     const state = userSyncState.get(userId);
     if (!state)
         return;
-    const payload = JSON.stringify({
-        runId: state.runId,
-        status: state.status,
-        currentFile: state.currentFile,
-        fileCounts: {
-            uploaded,
-            skipped,
-            failed,
-            uninitialized: discovered - uploaded - skipped - failed,
-        },
-    });
-    for (const res of clients)
-        res.write(`data: ${payload}\n\n`);
+    const now = Date.now();
+    if (now - (lastProgressPushAt.get(userId) ?? 0) < 1000)
+        return;
+    lastProgressPushAt.set(userId, now);
+    (0, db_1.getFileCounts)(userId)
+        .then((countsRaw) => {
+        const payload = JSON.stringify({
+            runId: state.runId,
+            status: state.status,
+            currentFile: state.currentFile,
+            fileCounts: Object.fromEntries(countsRaw.map((r) => [r.status, r.count])),
+        });
+        for (const res of clients)
+            res.write(`data: ${payload}\n\n`);
+    })
+        .catch((err) => console.error("[sync] failed to push progress:", err));
 }
 async function startSync(userId, useAI, folderId, driveAccessToken) {
     const existing = userSyncState.get(userId);
@@ -153,7 +162,7 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
         }
         await (0, db_1.upsertDriveFile)(file.id, userId, folderId, file.name, file.md5, file.mime_type, file.size);
         discovered++;
-        pushProgress(userId, discovered, 0, 0, 0);
+        pushProgress(userId);
         if (discovered % 500 === 0)
             console.log(`[sync:${userId}]   ${discovered} files found so far...`);
     }
@@ -185,14 +194,14 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
                 if (file.size && file.size > MAX_FILE_SIZE) {
                     await (0, db_1.updateFileStatus)("skipped", null, "file too large", 0, file.id, userId);
                     skipped++;
-                    pushProgress(userId, discovered, uploaded, skipped, failed);
+                    pushProgress(userId);
                     continue;
                 }
                 // Dedup: if another file with the same md5 was already uploaded, skip
                 if (file.md5 && (await (0, db_1.getMd5Uploaded)(userId, file.md5))) {
                     await (0, db_1.updateFileStatus)("skipped", null, "duplicate md5", 0, file.id, userId);
                     skipped++;
-                    pushProgress(userId, discovered, uploaded, skipped, failed);
+                    pushProgress(userId);
                     continue;
                 }
                 state.currentFile = file.name;
@@ -204,7 +213,7 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
                 const mediaId = await (0, retry_1.withRetry)(() => (0, photos_1.uploadPhoto)(photosAuth, stream_1.Readable.from(fileBuffer), file.name, file.mime_type, description));
                 await (0, db_1.updateFileStatus)("uploaded", mediaId, null, 0, file.id, userId);
                 uploaded++;
-                pushProgress(userId, discovered, uploaded, skipped, failed);
+                pushProgress(userId);
                 console.log(`[sync:${userId}]   ✓ ${file.name} (${uploaded} uploaded)`);
             }
             catch (err) {
@@ -220,7 +229,7 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
                 }
                 await (0, db_1.updateFileStatus)("failed", null, detail, 1, file.id, userId);
                 failed++;
-                pushProgress(userId, discovered, uploaded, skipped, failed);
+                pushProgress(userId);
             }
         }
     }

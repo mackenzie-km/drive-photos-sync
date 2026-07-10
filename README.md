@@ -21,10 +21,11 @@ Why search through drive, hunting around for your old photos? This web app
 
 1. You authenticate with Google via OAuth
 2. You use the Google Drive Picker to select a specific folder to sync
-3. The app discovers all image files in that folder (up to 10,000 with AI, unlimited without)
+3. The app discovers all image files in that folder (up to 10,000 with AI, up to 20,000 without)
 4. Each file is downloaded and optionally sent to Gemini to generate a descriptive caption
 5. The file is uploaded to Google Photos with the caption attached
-6. Progress is tracked in Postgres — syncs are resumable and idempotent
+6. Progress streams to the browser in real time over Server-Sent Events (SSE) — no polling
+7. Progress is tracked in Postgres — syncs are resumable and idempotent
 
 ## Local setup
 
@@ -108,9 +109,10 @@ npm run dev
 
 | Method | Route          | Description                                                                                                                                                                                                                                                                                                                |
 | ------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/sync/status` | Tells you if you're syncing or not, and which file is currently being processed                                                                                                                                                                                                                                            |
+| `GET`  | `/sync/events` | Opens a Server-Sent Events stream. Sends a full snapshot immediately on connect (and on every reconnect), then pushes live updates as discovery/upload progresses. This is what the frontend uses in place of polling.                                                                                                    |
+| `GET`  | `/sync/status` | One-shot snapshot of sync progress (status, current file, file counts). Superseded by `/sync/events` for the live UI; still useful for scripts or a manual check.                                                                                                                                                          |
 | `GET`  | `/sync/files`  | Returns list of already uploaded files                                                                                                                                                                                                                                                                                     |
-| `POST` | `/sync/start`  | Kicks off the sync process. Requires `folderId` (from the Picker) and accepts `useAI` (default `true`). Discovers photos in the selected folder, saves records to DB, optionally sends photos to Gemini for descriptions, then uploads to Google Photos one at a time. Capped at 10,000 files per sync when AI is enabled. |
+| `POST` | `/sync/start`  | Kicks off the sync process. Requires `folderId` (from the Picker) and accepts `useAI` (default `true`). Discovers photos in the selected folder, saves records to DB, optionally sends photos to Gemini for descriptions, then uploads to Google Photos one at a time. Capped at 10,000 files per sync with AI, 20,000 without. |
 | `POST` | `/sync/abort`  | Gracefully stops sync: immediately clears local memory and sets a flag so the loop stops after the current file finishes                                                                                                                                                                                                   |
 
 ### Health
@@ -174,8 +176,18 @@ uninitialized → in_progress → uploaded
 
 At the start of each sync run:
 
-- Files stuck in `in_progress` (e.g. from a crash) are reset to `uninitialized`
-- All `failed` and `uninitialized` files are deleted so the selected folder is re-discovered fresh — this prevents failures from a previous folder bleeding into the new sync
+- Files stuck in `in_progress` (e.g. from a crash) are reset to `uninitialized` (across all folders, as a crash-recovery safety net)
+- The selected folder's `uninitialized` files are deleted so it's re-discovered fresh — this prevents stale entries from a previous run of the *same* folder from lingering
+- `failed` files are left in place and retried automatically (up to 3 attempts) on the next sync of that folder — they are not cleared
+
+## Real-time updates (SSE)
+
+The frontend gets live sync progress over a Server-Sent Events stream (`GET /sync/events`) instead of polling. One long-lived connection stays open per browser tab:
+
+- On connect (including automatic reconnects), the server immediately sends a full snapshot — current phase, current file, and file counts — so the UI is never blank or stale.
+- As discovery/upload progresses, the server pushes updates: unthrottled at phase transitions (`discovering` → `uploading` → done), and throttled to roughly once per second during the per-file hot loop, to keep database load bounded no matter how fast files process.
+- A heartbeat comment is sent every 15 seconds to keep the connection alive through proxies that time out idle connections.
+- File counts are always read fresh from the database rather than tracked locally in memory — they represent totals across all of a user's folders and past syncs, not just the current run, so they can't be reconstructed from a single run's local counters.
 
 ## npm scripts
 
