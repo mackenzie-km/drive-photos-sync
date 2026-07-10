@@ -41,7 +41,8 @@ import {
   upsertDriveFile,
   clearFailedFiles,
 } from "./db";
-import { listDrivePhotos } from "./drive";
+import { listDrivePhotos, downloadDriveFile } from "./drive";
+import { uploadPhoto } from "./photos";
 
 const mockGeneratePhotoDescription = generatePhotoDescription as jest.Mock;
 const mockListDrivePhotos = listDrivePhotos as jest.Mock;
@@ -53,6 +54,8 @@ const mockCreateSyncRun = createSyncRun as jest.Mock;
 const mockClearUninitializedFiles = clearUninitializedFiles as jest.Mock;
 const mockUpsertDriveFile = upsertDriveFile as jest.Mock;
 const mockClearFailedFiles = clearFailedFiles as jest.Mock;
+const mockDownloadDriveFile = downloadDriveFile as jest.Mock;
+const mockUploadPhoto = uploadPhoto as jest.Mock;
 
 // Polls until condition is true — used because runSync runs fire-and-forget.
 async function waitFor(condition: () => boolean, timeoutMs = 3000) {
@@ -253,5 +256,207 @@ describe("startSync — Gemini integration", () => {
     await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
 
     expect(mockGeneratePhotoDescription).not.toHaveBeenCalled();
+  });
+});
+
+describe("startSync — file size limit", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockListDrivePhotos.mockImplementation(async function* () {});
+  });
+
+  it("marks a file as skipped when size exceeds 200MB", async () => {
+    mockGetUninitializedFiles
+      .mockResolvedValueOnce([{ ...FILE, size: 201 * 1024 * 1024 }])
+      .mockResolvedValue([]);
+
+    await startSync("user-size-1", false, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockUpdateFileStatus).toHaveBeenCalledWith(
+      "skipped",
+      null,
+      "file too large",
+      0,
+      FILE.id,
+      "user-size-1",
+    );
+  });
+
+  it("does not skip a file just under 200MB", async () => {
+    mockGetUninitializedFiles
+      .mockResolvedValueOnce([{ ...FILE, size: 200 * 1024 * 1024 - 1 }])
+      .mockResolvedValue([]);
+
+    await startSync("user-size-2", false, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockUpdateFileStatus).not.toHaveBeenCalledWith(
+      "skipped",
+      null,
+      "file too large",
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("does not skip a file with null size", async () => {
+    mockGetUninitializedFiles
+      .mockResolvedValueOnce([{ ...FILE, size: null }])
+      .mockResolvedValue([]);
+
+    await startSync("user-size-3", false, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockUpdateFileStatus).not.toHaveBeenCalledWith(
+      "skipped",
+      null,
+      "file too large",
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+});
+
+describe("startSync — upload error paths", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockListDrivePhotos.mockImplementation(async function* () {});
+  });
+
+  it("marks a file as failed with extracted API reason when uploadPhoto throws a structured error", async () => {
+    mockGetUninitializedFiles
+      .mockResolvedValueOnce([FILE])
+      .mockResolvedValue([]);
+
+    // A 500 error (not retried by withRetry) with a structured response body
+    const apiError = Object.assign(new Error("Request failed with status 500"), {
+      response: {
+        status: 500,
+        data: { error: { errors: [{ reason: "backendError" }] } },
+      },
+    });
+    mockUploadPhoto.mockRejectedValueOnce(apiError);
+
+    await startSync("user-err-axios", false, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockUpdateFileStatus).toHaveBeenCalledWith(
+      "failed",
+      null,
+      "Request failed with status 500 (reason: backendError)",
+      1,
+      FILE.id,
+      "user-err-axios",
+    );
+  });
+
+  it("marks a file as failed with the plain message when uploadPhoto throws without response data", async () => {
+    mockGetUninitializedFiles
+      .mockResolvedValueOnce([FILE])
+      .mockResolvedValue([]);
+
+    mockUploadPhoto.mockRejectedValueOnce(new Error("network error"));
+
+    await startSync("user-err-plain", false, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockUpdateFileStatus).toHaveBeenCalledWith(
+      "failed",
+      null,
+      "network error",
+      1,
+      FILE.id,
+      "user-err-plain",
+    );
+  });
+
+  it("marks a file as failed when downloadDriveFile throws", async () => {
+    mockGetUninitializedFiles
+      .mockResolvedValueOnce([FILE])
+      .mockResolvedValue([]);
+
+    mockDownloadDriveFile.mockRejectedValueOnce(new Error("download failed"));
+
+    await startSync("user-err-download", false, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockUpdateFileStatus).toHaveBeenCalledWith(
+      "failed",
+      null,
+      "download failed",
+      1,
+      FILE.id,
+      "user-err-download",
+    );
+  });
+});
+
+describe("startSync — limit_reached", () => {
+  // These tests drive 10 001 mock iterations (useAI=true → MAX_PER_SYNC=10 000).
+  // Mocks resolve synchronously so this completes in well under 1 s in practice,
+  // but we give Jest extra headroom in case of CI slowness.
+  beforeAll(() => jest.setTimeout(15000));
+  afterAll(() => jest.setTimeout(5000));
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("sets final status to limit_reached when discovery exceeds MAX_PER_SYNC", async () => {
+    const MAX = 10_000; // useAI=true → MAX_PER_SYNC = 10_000
+    mockListDrivePhotos.mockImplementation(async function* () {
+      for (let i = 0; i <= MAX; i++) {
+        yield { id: `file-${i}`, name: `photo${i}.jpg`, md5: `md5-${i}`, mime_type: "image/jpeg", size: 1024 };
+      }
+    });
+    mockGetUninitializedFiles.mockResolvedValue([]);
+
+    await startSync("user-limit-disc", true, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0, 14000);
+
+    expect(mockUpdateSyncRun).toHaveBeenCalledWith(
+      "limit_reached",
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      "user-limit-disc",
+    );
+  });
+
+  it("sets final status to limit_reached when upload count exceeds MAX_PER_SYNC", async () => {
+    const MAX = 10_000; // useAI=true → MAX_PER_SYNC = 10_000
+    mockListDrivePhotos.mockImplementation(async function* () {});
+
+    const batch = Array.from({ length: MAX + 1 }, (_, i) => ({
+      id: `file-${i}`,
+      name: `photo${i}.jpg`,
+      md5: null,
+      mime_type: "image/jpeg",
+      size: 1024,
+      retry_count: 0,
+    }));
+    mockGetUninitializedFiles
+      .mockResolvedValueOnce(batch)
+      .mockResolvedValue([]);
+
+    await startSync("user-limit-upload", true, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0, 14000);
+
+    expect(mockUpdateSyncRun).toHaveBeenCalledWith(
+      "limit_reached",
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      "user-limit-upload",
+    );
   });
 });

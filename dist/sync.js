@@ -28,7 +28,7 @@ function requestAbort(userId) {
         userSyncState.delete(userId);
     }
 }
-async function startSync(userId, useAI, folderId) {
+async function startSync(userId, useAI, folderId, driveAccessToken) {
     const existing = userSyncState.get(userId);
     if (existing?.status === "discovering" || existing?.status === "uploading") {
         throw new Error("A sync is already running");
@@ -49,14 +49,16 @@ async function startSync(userId, useAI, folderId) {
     }
     userSyncState.get(userId).runId = runId;
     // Fire and forget — progress is tracked in the DB and queryable via /sync/status
-    runSync(userId, runId, useAI, folderId).catch((err) => {
+    runSync(userId, runId, useAI, folderId, driveAccessToken).catch((err) => {
         console.error("[sync] fatal error:", err.message);
         finishRun(userId, runId, "failed", 0, 0, 0, 0);
     });
     return runId;
 }
-async function runSync(userId, runId, useAI, folderId) {
-    const driveAuth = await (0, auth_1.getAuthClient)(userId);
+async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
+    const driveAuth = driveAccessToken
+        ? (0, auth_1.createClientFromToken)(driveAccessToken)
+        : await (0, auth_1.getAuthClient)(userId);
     const photosAuth = await (0, auth_1.getAuthClient)(userId);
     const state = userSyncState.get(userId);
     await (0, db_1.resetStuckFiles)(userId);
