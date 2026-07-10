@@ -10,12 +10,43 @@ const IDLE_STATUS = {
   fileCounts: {},
 };
 
+// Minimal EventSource stub: on construction, waits a microtask (so the
+// component has finished assigning onmessage/onerror/onopen, mirroring how
+// the real connection's first push always arrives after handlers are wired
+// up) then emits whatever status stubEventSource() was last called with.
+let currentEventStatus: unknown = IDLE_STATUS;
+
+class MockEventSource {
+  static instances: MockEventSource[] = [];
+  url: string;
+  onmessage: ((e: { data: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onopen: (() => void) | null = null;
+  closed = false;
+  constructor(url: string) {
+    this.url = url;
+    MockEventSource.instances.push(this);
+    queueMicrotask(() => this.emit(currentEventStatus));
+  }
+  close() {
+    this.closed = true;
+  }
+  emit(data: unknown) {
+    this.onopen?.();
+    this.onmessage?.({ data: JSON.stringify(data) });
+  }
+}
+
+function stubEventSource(status: unknown = IDLE_STATUS) {
+  currentEventStatus = status;
+  MockEventSource.instances = [];
+  vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+}
+
 function stubFetch(overrides: Record<string, unknown> = {}) {
   vi.stubGlobal(
     "fetch",
     vi.fn((url: string, init?: RequestInit) => {
-      if (url === "/sync/status")
-        return Promise.resolve({ ok: true, json: () => Promise.resolve(IDLE_STATUS) } as Response);
       if (url in overrides) {
         const val = overrides[url];
         return Promise.resolve(val as Response);
@@ -61,6 +92,7 @@ function setupPickerMock() {
 describe("MainPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    stubEventSource();
   });
 
   it("renders the start sync button", async () => {
@@ -94,17 +126,7 @@ describe("MainPage", () => {
 
   it("displays file counts from the API with no undefined or NaN values", async () => {
     const fileCounts = { uploaded: 42, uninitialized: 17, failed: 8, skipped: 3 };
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((url: string) => {
-        if (url === "/sync/status")
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ ...IDLE_STATUS, fileCounts }),
-          } as Response);
-        throw new Error(`Unexpected fetch: ${url}`);
-      }),
-    );
+    stubEventSource({ ...IDLE_STATUS, fileCounts });
 
     render(<MainPage />);
 
@@ -119,17 +141,7 @@ describe("MainPage", () => {
   });
 
   it("defaults all file counts to 0 when the API omits them", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((url: string) => {
-        if (url === "/sync/status")
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ ...IDLE_STATUS, fileCounts: {} }),
-          } as Response);
-        throw new Error(`Unexpected fetch: ${url}`);
-      }),
-    );
+    stubEventSource({ ...IDLE_STATUS, fileCounts: {} });
 
     render(<MainPage />);
 
@@ -150,8 +162,6 @@ describe("MainPage", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((url: string) => {
-        if (url === "/sync/status")
-          return Promise.resolve({ ok: true, json: () => Promise.resolve(IDLE_STATUS) } as Response);
         if (url === "/sync/files")
           return Promise.resolve({ ok: true, json: () => Promise.resolve({ files }) } as Response);
         throw new Error(`Unexpected fetch: ${url}`);
@@ -244,8 +254,6 @@ describe("MainPage", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((url: string) => {
-        if (url === "/sync/status")
-          return Promise.resolve({ ok: true, json: () => Promise.resolve(IDLE_STATUS) } as Response);
         if (url === "/sync/files")
           return Promise.resolve({ ok: false, json: () => Promise.resolve({}) } as Response);
         throw new Error(`Unexpected fetch: ${url}`);

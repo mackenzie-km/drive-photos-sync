@@ -62,21 +62,16 @@ export default function MainPage() {
   const [folderName, setFolderName] = useState<string | null>(null);
   const [driveAccessToken, setDriveAccessToken] = useState<string | null>(null);
 
-  const pollStatus = () => {
-    fetch("/sync/status", { cache: "no-store" })
-      .then((r) => r.json())
-      .then(setSyncStatus)
-      .catch(() =>
-        setError(
-          "Unable to reach the server. Please try refreshing the page.",
-        ),
-      );
-  };
-
   useEffect(() => {
-    pollStatus();
-    const interval = setInterval(pollStatus, 2000);
-    return () => clearInterval(interval);
+    const source = new EventSource("/sync/events");
+    source.onmessage = (e) => setSyncStatus(JSON.parse(e.data));
+    // EventSource auto-reconnects on its own (default ~3s backoff); the
+    // server sends a fresh snapshot on every new connection, so no manual
+    // retry logic is needed here — just surface the transient state.
+    source.onerror = () =>
+      setError("Unable to reach the server. Please try refreshing the page.");
+    source.onopen = () => setError(null);
+    return () => source.close();
   }, []);
 
   async function handleToggleFiles() {
@@ -103,7 +98,9 @@ export default function MainPage() {
         body: JSON.stringify({ useAI, folderId, driveAccessToken }),
       });
       if (res.ok) {
-        pollStatus();
+        // No manual refetch needed — the open SSE connection will receive a
+        // push as soon as runSync flips state to "discovering". This just
+        // optimistically clears stale error/failed info from the prior run.
         setSyncStatus((prev) =>
           prev
             ? {
