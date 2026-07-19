@@ -125,10 +125,17 @@ button:hover {
   opacity: 1;
 }
 
+.btn-secondary:disabled {
+  background: #ddd4c9;
+  color: #141414;
+  box-shadow: none;
+  opacity: 1;
+}
+
 .btn-green {
   background: linear-gradient(to right, #2a7a3b, #348a47);
   color: white;
-  min-width: 180px;
+  min-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -435,6 +442,16 @@ button:disabled:hover {
   height: 40px;
   border: 4px solid #f4d6b0;
   border-top-color: #c97d35;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.spinner-sm {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(20, 20, 20, 0.25);
+  border-top-color: #141414;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }

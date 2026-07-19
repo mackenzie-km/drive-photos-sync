@@ -9,7 +9,7 @@ import {
   resetStuckFiles,
   upsertDriveFile,
   getUninitializedFiles,
-  clearUninitializedFiles,
+  clearPendingFiles,
   clearFailedFiles,
 } from "./db";
 
@@ -37,34 +37,34 @@ describe("upsertDriveFile", () => {
 describe("getUninitializedFiles", () => {
   beforeEach(() => mockQuery.mockClear());
 
-  it("scopes the query to the given folderId", async () => {
+  it("is not scoped to any folder — global across all of the user's folders", async () => {
     mockQuery.mockResolvedValueOnce({ rows: [] });
-    await getUninitializedFiles("user-1", "folder-abc");
+    await getUninitializedFiles("user-1");
 
     const [sql, params] = mockQuery.mock.calls[0];
-    expect(sql).toContain("folder_id");
-    expect(params).toContain("folder-abc");
+    expect(sql).not.toContain("folder_id");
+    expect(params).toEqual(["user-1"]);
   });
 
   it("includes failed files with retry_count below the limit", async () => {
     mockQuery.mockResolvedValueOnce({ rows: [] });
-    await getUninitializedFiles("user-1", "folder-abc");
+    await getUninitializedFiles("user-1");
 
     const [sql] = mockQuery.mock.calls[0];
     expect(sql).toContain("retry_count < 3");
   });
 });
 
-describe("clearUninitializedFiles", () => {
+describe("clearPendingFiles", () => {
   beforeEach(() => mockQuery.mockClear());
 
-  it("deletes only uninitialized files for the given folder", async () => {
-    await clearUninitializedFiles("user-1", "folder-abc");
+  it("deletes all uninitialized files for the user, across every folder", async () => {
+    await clearPendingFiles("user-1");
 
     const [sql, params] = mockQuery.mock.calls[0];
-    expect(sql).toContain("folder_id");
+    expect(sql).not.toContain("folder_id");
     expect(sql).toContain("status = 'uninitialized'");
-    expect(params).toEqual(["user-1", "folder-abc"]);
+    expect(params).toEqual(["user-1"]);
   });
 });
 

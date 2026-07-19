@@ -77,29 +77,30 @@ async function pushSnapshot(userId, targets) {
     for (const res of clients)
         res.write(`data: ${payload}\n\n`);
 }
-// Local-state-only push for the per-file hot path. uploaded/skipped/failed
-// come from runSync's own closure counters — no DB round trip — so this is
-// cheap enough to call on every file without throttling.
-function pushProgress(userId, discovered, uploaded, skipped, failed) {
+const lastProgressPushAt = new Map();
+function pushProgress(userId) {
     const clients = userSyncClients.get(userId);
     if (!clients || clients.size === 0)
         return;
     const state = userSyncState.get(userId);
     if (!state)
         return;
-    const payload = JSON.stringify({
-        runId: state.runId,
-        status: state.status,
-        currentFile: state.currentFile,
-        fileCounts: {
-            uploaded,
-            skipped,
-            failed,
-            uninitialized: discovered - uploaded - skipped - failed,
-        },
-    });
-    for (const res of clients)
-        res.write(`data: ${payload}\n\n`);
+    const now = Date.now();
+    if (now - (lastProgressPushAt.get(userId) ?? 0) < 1000)
+        return;
+    lastProgressPushAt.set(userId, now);
+    (0, db_1.getFileCounts)(userId)
+        .then((countsRaw) => {
+        const payload = JSON.stringify({
+            runId: state.runId,
+            status: state.status,
+            currentFile: state.currentFile,
+            fileCounts: Object.fromEntries(countsRaw.map((r) => [r.status, r.count])),
+        });
+        for (const res of clients)
+            res.write(`data: ${payload}\n\n`);
+    })
+        .catch((err) => console.error("[sync] failed to push progress:", err));
 }
 async function startSync(userId, useAI, folderId, driveAccessToken) {
     const existing = userSyncState.get(userId);
@@ -135,31 +136,38 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
     const photosAuth = await (0, auth_1.getAuthClient)(userId);
     const state = userSyncState.get(userId);
     await (0, db_1.resetStuckFiles)(userId);
-    await (0, db_1.clearUninitializedFiles)(userId, folderId);
     // Cap per sync run — only applies when AI is on (Gemini adds time per file)
     const MAX_PER_SYNC = useAI ? 10_000 : 20_000;
     // ── Phase 1: discover ──────────────────────────────────────────────────────
+    // Skipped entirely when the user already has pending files anywhere
+    const countsBeforeDiscovery = await (0, db_1.getFileCounts)(userId);
+    const pendingCount = Number(countsBeforeDiscovery.find((r) => r.status === "uninitialized")?.count ?? 0);
     let discovered = 0;
     let limitReached = false;
-    state.status = "discovering";
-    pushSnapshot(userId);
-    console.log(`[sync:${userId}] Phase 1: discovering Drive photos in folder ${folderId}...`);
-    for await (const file of (0, drive_1.listDrivePhotos)(driveAuth, folderId)) {
-        if (state.shouldAbort)
-            break;
-        if (discovered >= MAX_PER_SYNC) {
-            limitReached = true;
-            break;
-        }
-        await (0, db_1.upsertDriveFile)(file.id, userId, folderId, file.name, file.md5, file.mime_type, file.size);
-        discovered++;
-        pushProgress(userId, discovered, 0, 0, 0);
-        if (discovered % 500 === 0)
-            console.log(`[sync:${userId}]   ${discovered} files found so far...`);
+    if (pendingCount > 0) {
+        console.log(`[sync:${userId}] Found ${pendingCount} pending files across all folders — skipping discovery.`);
     }
-    console.log(`[sync:${userId}] Discovery complete: ${discovered} photos found.`);
-    if (state.shouldAbort) {
-        return finishRun(userId, runId, "aborted", discovered, 0, 0, 0);
+    else {
+        state.status = "discovering";
+        pushSnapshot(userId);
+        console.log(`[sync:${userId}] Phase 1: discovering Drive photos in folder ${folderId}...`);
+        for await (const file of (0, drive_1.listDrivePhotos)(driveAuth, folderId)) {
+            if (state.shouldAbort)
+                break;
+            if (discovered >= MAX_PER_SYNC) {
+                limitReached = true;
+                break;
+            }
+            await (0, db_1.upsertDriveFile)(file.id, userId, folderId, file.name, file.md5, file.mime_type, file.size);
+            discovered++;
+            pushProgress(userId);
+            if (discovered % 500 === 0)
+                console.log(`[sync:${userId}]   ${discovered} files found so far...`);
+        }
+        console.log(`[sync:${userId}] Discovery complete: ${discovered} photos found.`);
+        if (state.shouldAbort) {
+            return finishRun(userId, runId, "aborted", discovered, 0, 0, 0);
+        }
     }
     // ── Phase 2: upload ────────────────────────────────────────────────────────
     state.status = "uploading";
@@ -167,7 +175,7 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
     console.log(`[sync:${userId}] Phase 2: Preparing to upload photos.`);
     let uploaded = 0, skipped = 0, failed = 0;
     while (!state.shouldAbort && !limitReached) {
-        const batch = await (0, db_1.getUninitializedFiles)(userId, folderId);
+        const batch = await (0, db_1.getUninitializedFiles)(userId);
         if (batch.length === 0) {
             console.log(`[sync:${userId}] 0 uninitialized files remaining.`);
             break;
@@ -185,14 +193,14 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
                 if (file.size && file.size > MAX_FILE_SIZE) {
                     await (0, db_1.updateFileStatus)("skipped", null, "file too large", 0, file.id, userId);
                     skipped++;
-                    pushProgress(userId, discovered, uploaded, skipped, failed);
+                    pushProgress(userId);
                     continue;
                 }
                 // Dedup: if another file with the same md5 was already uploaded, skip
                 if (file.md5 && (await (0, db_1.getMd5Uploaded)(userId, file.md5))) {
                     await (0, db_1.updateFileStatus)("skipped", null, "duplicate md5", 0, file.id, userId);
                     skipped++;
-                    pushProgress(userId, discovered, uploaded, skipped, failed);
+                    pushProgress(userId);
                     continue;
                 }
                 state.currentFile = file.name;
@@ -204,7 +212,7 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
                 const mediaId = await (0, retry_1.withRetry)(() => (0, photos_1.uploadPhoto)(photosAuth, stream_1.Readable.from(fileBuffer), file.name, file.mime_type, description));
                 await (0, db_1.updateFileStatus)("uploaded", mediaId, null, 0, file.id, userId);
                 uploaded++;
-                pushProgress(userId, discovered, uploaded, skipped, failed);
+                pushProgress(userId);
                 console.log(`[sync:${userId}]   ✓ ${file.name} (${uploaded} uploaded)`);
             }
             catch (err) {
@@ -220,7 +228,7 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
                 }
                 await (0, db_1.updateFileStatus)("failed", null, detail, 1, file.id, userId);
                 failed++;
-                pushProgress(userId, discovered, uploaded, skipped, failed);
+                pushProgress(userId);
             }
         }
     }
@@ -230,18 +238,8 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
 }
 function finishRun(userId, runId, status, total, uploaded, skipped, failed) {
     const state = userSyncState.get(userId);
-    // Guard on runId: if the user aborted and immediately re-started, state now
-    // belongs to the new sync — don't overwrite it with this run's terminal status.
     if (state && state.runId === runId)
         state.status = status;
-    // Terminal push queries drive_files for real, rather than trusting this
-    // function's own args — startSync's fire-and-forget catch handler calls
-    // finishRun(..., "failed", 0, 0, 0, 0) when runSync throws mid-sync (e.g. an
-    // expired driveAccessToken partway through discovery), since it has no
-    // access to runSync's real closure counters. Building the payload from
-    // those args would broadcast all-zero counts even though drive_files
-    // genuinely has rows from whatever was discovered/uploaded before the
-    // failure. One query, once per finished run — not the per-file hot path.
     const clients = userSyncClients.get(userId);
     if (clients && clients.size > 0) {
         (0, db_1.getFileCounts)(userId)
