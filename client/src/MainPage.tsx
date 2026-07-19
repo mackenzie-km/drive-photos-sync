@@ -233,7 +233,7 @@ export default function MainPage() {
               disabled={IS_RUNNING(status)}
               onChange={(e) => setUseAI(e.target.checked)}
             />{" "}
-            Use AI descriptions (slower, up to 1,000 photos)
+            Use AI descriptions (slower, up to 10,000 photos)
           </label>
         }
         <p className="tagline">
