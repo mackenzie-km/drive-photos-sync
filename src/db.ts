@@ -166,23 +166,25 @@ export async function clearFailedFiles(userId: string, folderId: string) {
   );
 }
 
-// Clear uninitialized files for this folder before discovery re-populates them
-export async function clearUninitializedFiles(userId: string, folderId: string) {
+// Clear all pending (never-uploaded) files for this user, across every folder —
+// a deliberate "drop the backlog" action, not called automatically during sync.
+export async function clearPendingFiles(userId: string) {
   await query(
-    `DELETE FROM drive_files WHERE user_id = $1 AND folder_id = $2 AND status = 'uninitialized'`,
-    [userId, folderId],
+    `DELETE FROM drive_files WHERE user_id = $1 AND status = 'uninitialized'`,
+    [userId],
   );
 }
 
 // Pick up uninitialized files and failed files that haven't exceeded the retry limit,
-// scoped to the current folder so cross-folder failures don't bleed in.
-export async function getUninitializedFiles(userId: string, folderId: string) {
+// across all of the user's folders — this is one global work queue, not scoped
+// to whichever folder is currently selected in the Picker.
+export async function getUninitializedFiles(userId: string) {
   const result = await query(
     `SELECT * FROM drive_files
-     WHERE user_id = $1 AND folder_id = $2
+     WHERE user_id = $1
        AND (status = 'uninitialized' OR (status = 'failed' AND retry_count < 3))
      LIMIT 50`,
-    [userId, folderId],
+    [userId],
   );
   return result.rows;
 }
@@ -193,6 +195,15 @@ export async function getFileCounts(userId: string) {
     [userId],
   );
   return result.rows as { status: string; count: number }[];
+}
+export async function getResumableCount(userId: string): Promise<number> {
+  const result = await query(
+    `SELECT COUNT(*) as count FROM drive_files
+     WHERE user_id = $1
+       AND (status = 'uninitialized' OR (status = 'failed' AND retry_count < 3))`,
+    [userId],
+  );
+  return Number(result.rows[0]?.count ?? 0);
 }
 
 // RETURNING id is how pg gives you back the auto-generated SERIAL id after an insert

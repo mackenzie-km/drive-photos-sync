@@ -9,7 +9,8 @@ import {
   resetStuckFiles,
   upsertDriveFile,
   getUninitializedFiles,
-  clearUninitializedFiles,
+  getResumableCount,
+  clearPendingFiles,
   clearFailedFiles,
 } from "./db";
 
@@ -37,34 +38,54 @@ describe("upsertDriveFile", () => {
 describe("getUninitializedFiles", () => {
   beforeEach(() => mockQuery.mockClear());
 
-  it("scopes the query to the given folderId", async () => {
+  it("is not scoped to any folder — global across all of the user's folders", async () => {
     mockQuery.mockResolvedValueOnce({ rows: [] });
-    await getUninitializedFiles("user-1", "folder-abc");
+    await getUninitializedFiles("user-1");
 
     const [sql, params] = mockQuery.mock.calls[0];
-    expect(sql).toContain("folder_id");
-    expect(params).toContain("folder-abc");
+    expect(sql).not.toContain("folder_id");
+    expect(params).toEqual(["user-1"]);
   });
 
   it("includes failed files with retry_count below the limit", async () => {
     mockQuery.mockResolvedValueOnce({ rows: [] });
-    await getUninitializedFiles("user-1", "folder-abc");
+    await getUninitializedFiles("user-1");
 
     const [sql] = mockQuery.mock.calls[0];
     expect(sql).toContain("retry_count < 3");
   });
 });
 
-describe("clearUninitializedFiles", () => {
+describe("getResumableCount", () => {
   beforeEach(() => mockQuery.mockClear());
 
-  it("deletes only uninitialized files for the given folder", async () => {
-    await clearUninitializedFiles("user-1", "folder-abc");
+  it("uses the same status filter as getUninitializedFiles — global, uninitialized OR retryable failed", async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [{ count: "7" }] });
+    const result = await getResumableCount("user-1");
 
     const [sql, params] = mockQuery.mock.calls[0];
-    expect(sql).toContain("folder_id");
+    expect(sql).not.toContain("folder_id");
+    expect(sql).toContain("retry_count < 3");
+    expect(params).toEqual(["user-1"]);
+    expect(result).toBe(7);
+  });
+
+  it("returns 0 when there are no matching rows", async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [{ count: "0" }] });
+    expect(await getResumableCount("user-1")).toBe(0);
+  });
+});
+
+describe("clearPendingFiles", () => {
+  beforeEach(() => mockQuery.mockClear());
+
+  it("deletes all uninitialized files for the user, across every folder", async () => {
+    await clearPendingFiles("user-1");
+
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).not.toContain("folder_id");
     expect(sql).toContain("status = 'uninitialized'");
-    expect(params).toEqual(["user-1", "folder-abc"]);
+    expect(params).toEqual(["user-1"]);
   });
 });
 

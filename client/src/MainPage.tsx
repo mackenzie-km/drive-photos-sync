@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 
-
 interface SyncStatus {
   status:
     | "idle"
@@ -28,6 +27,7 @@ interface SyncStatus {
     failed?: number;
     skipped?: number;
   };
+  resumableCount: number;
 }
 
 interface UploadedFile {
@@ -51,6 +51,29 @@ const STATUS_LABEL: Record<string, string> = {
 const IS_RUNNING = (status: string) =>
   status === "discovering" || status === "uploading";
 
+const TOKEN_MAX_AGE_MS = 50 * 60 * 1000;
+
+function createTokenClient(
+  clientId: string,
+  callback: (response: any) => void,
+) {
+  return (window as any).google.accounts.oauth2.initTokenClient({
+    client_id: clientId,
+    scope: "https://www.googleapis.com/auth/drive.file",
+    callback,
+  });
+}
+
+async function getDriveToken(): Promise<string | null> {
+  const res = await fetch("/picker/config");
+  const { client_id } = await res.json();
+  return new Promise((resolve) => {
+    const tokenClient = createTokenClient(client_id, (response: any) =>
+      resolve(response.access_token ?? null),
+    );
+    tokenClient.requestAccessToken({ prompt: "" });
+  });
+}
 
 export default function MainPage() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
@@ -61,6 +84,8 @@ export default function MainPage() {
   const [folderId, setFolderId] = useState<string | null>(null);
   const [folderName, setFolderName] = useState<string | null>(null);
   const [driveAccessToken, setDriveAccessToken] = useState<string | null>(null);
+  const [tokenMintedAt, setTokenMintedAt] = useState<number | null>(null);
+  const [aborting, setAborting] = useState(false);
 
   useEffect(() => {
     const source = new EventSource("/sync/events");
@@ -91,11 +116,37 @@ export default function MainPage() {
   }
 
   async function handleStartSync() {
+    const canResume = Number(syncStatus?.resumableCount ?? 0) > 0;
+
+    if (!canResume && !folderId) {
+      setError("Select a folder first.");
+      return;
+    }
+
+    const tokenStale =
+      tokenMintedAt !== null && Date.now() - tokenMintedAt > TOKEN_MAX_AGE_MS;
+    let token = tokenStale ? null : driveAccessToken;
+    if (!token) {
+      try {
+        token = await getDriveToken();
+      } catch {
+        token = null;
+      }
+      if (!token) {
+        setError(
+          'Could not reconnect to Drive automatically. Click "Select a Folder" to reconnect, then try again.',
+        );
+        return;
+      }
+      setDriveAccessToken(token);
+      setTokenMintedAt(Date.now());
+    }
+
     try {
       const res = await fetch("/sync/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ useAI, folderId, driveAccessToken }),
+        body: JSON.stringify({ useAI, folderId, driveAccessToken: token }),
       });
       if (res.ok) {
         // No manual refetch needed — the open SSE connection will receive a
@@ -126,45 +177,61 @@ export default function MainPage() {
     }
   }
 
+  async function handleClearPending() {
+    try {
+      const res = await fetch("/sync/pending/clear", { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json();
+        setError(
+          body.error ??
+            "Could not clear pending files. Please try again shortly.",
+        );
+      }
+      // No manual state update on success — pushSnapshot on the backend
+      // broadcasts fresh counts over the already-open EventSource.
+    } catch {
+      setError("Could not clear pending files. Please try again shortly.");
+    }
+  }
+
   async function openPicker() {
     const res = await fetch("/picker/config");
     const { client_id, api_key } = await res.json();
 
-    const tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
-      client_id,
-      scope: "https://www.googleapis.com/auth/drive.file",
-      callback: (response: any) => {
-        const access_token = response.access_token;
-        if (!access_token) return;
+    const tokenClient = createTokenClient(client_id, (response: any) => {
+      const access_token = response.access_token;
+      if (!access_token) return;
 
-        (window as any).gapi.load("picker", () => {
-          const gp = (window as any).google.picker;
-          const folderView = new gp.DocsView()
-            .setIncludeFolders(true)
-            .setSelectFolderEnabled(true)
-            .setMimeTypes("application/vnd.google-apps.folder");
-          let builder = new gp.PickerBuilder()
-            .addView(folderView)
-            .setOAuthToken(access_token)
-            .setCallback((data: any) => {
-              if (data.action === gp.Action.PICKED) {
-                setFolderId(data.docs[0].id);
-                setFolderName(data.docs[0].name);
-                setDriveAccessToken(access_token);
-              }
-            });
-          if (api_key) builder = builder.setDeveloperKey(api_key);
-          builder.build().setVisible(true);
-        });
-      },
+      (window as any).gapi.load("picker", () => {
+        const gp = (window as any).google.picker;
+        const folderView = new gp.DocsView()
+          .setIncludeFolders(true)
+          .setSelectFolderEnabled(true)
+          .setMimeTypes("application/vnd.google-apps.folder");
+        let builder = new gp.PickerBuilder()
+          .addView(folderView)
+          .setOAuthToken(access_token)
+          .setCallback((data: any) => {
+            if (data.action === gp.Action.PICKED) {
+              setFolderId(data.docs[0].id);
+              setFolderName(data.docs[0].name);
+              setDriveAccessToken(access_token);
+              setTokenMintedAt(Date.now());
+            }
+          });
+        if (api_key) builder = builder.setDeveloperKey(api_key);
+        builder.build().setVisible(true);
+      });
     });
     tokenClient.requestAccessToken({ prompt: "" });
   }
 
   async function handleAbort() {
+    setAborting(true);
     try {
       await fetch("/sync/abort", { method: "POST" });
     } catch {
+      setAborting(false);
       setError("Could not stop sync. Please try again shortly.");
     }
   }
@@ -175,6 +242,13 @@ export default function MainPage() {
   const progress = total > 0 ? Math.round((uploaded / total) * 100) : 0;
   const status = syncStatus?.status ?? "idle";
   const currentFile = syncStatus?.currentFile ?? null;
+  const canResume = Number(syncStatus?.resumableCount ?? 0) > 0;
+
+  useEffect(() => {
+    // Abort takes a moment (the in-flight file finishes first) — once the
+    // run actually leaves a running status, drop back to the plain button.
+    if (!IS_RUNNING(status)) setAborting(false);
+  }, [status]);
 
   return (
     <>
@@ -208,18 +282,33 @@ export default function MainPage() {
           </div>
           <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
             {IS_RUNNING(status) ? (
-              <button className="btn-secondary" onClick={handleAbort}>
-                ⏸ Abort
+              <button
+                className="btn-secondary"
+                onClick={handleAbort}
+                disabled={aborting}
+              >
+                {aborting ? <span className="spinner-sm" /> : "⏸"} Abort
               </button>
             ) : (
               <>
                 <button className="btn-green" onClick={openPicker}>
                   {folderName
-                    ? `Selected: ${folderName.length > 10 ? folderName.slice(0, 15) + "…" : folderName}`
-                    : "Select a Folder"}
+                    ? `📁 ${folderName.length > 10 ? folderName.slice(0, 15) + "…" : folderName}`
+                    : "Choose Folder"}
                 </button>
-                <button disabled={!folderId} onClick={handleStartSync}>
-                  ▶ Start Sync
+                {(counts.uninitialized ?? 0) > 0 && (
+                  <button
+                    className="btn-secondary"
+                    onClick={handleClearPending}
+                  >
+                    Clear
+                  </button>
+                )}
+                <button
+                  disabled={!folderId && !canResume}
+                  onClick={handleStartSync}
+                >
+                  {!folderId && canResume ? "▶ Resume" : "▶ Start"}
                 </button>
               </>
             )}
@@ -233,7 +322,7 @@ export default function MainPage() {
               disabled={IS_RUNNING(status)}
               onChange={(e) => setUseAI(e.target.checked)}
             />{" "}
-            Use AI descriptions (slower, up to 1,000 photos)
+            Use AI descriptions (slower, up to 10,000 photos)
           </label>
         }
         <p className="tagline">

@@ -1,6 +1,8 @@
 // Mock all external dependencies so no real DB or Google API calls are made.
 jest.mock("./auth", () => ({
-  getAuthUrl: jest.fn().mockReturnValue("https://accounts.google.com/fake-auth"),
+  getAuthUrl: jest
+    .fn()
+    .mockReturnValue("https://accounts.google.com/fake-auth"),
   handleCallback: jest.fn(),
 }));
 
@@ -8,6 +10,7 @@ jest.mock("./sync", () => ({
   startSync: jest.fn(),
   requestAbort: jest.fn(),
   getSyncSnapshot: jest.fn(),
+  getSyncState: jest.fn(),
   addSyncClient: jest.fn(),
   removeSyncClient: jest.fn(),
   pushSnapshot: jest.fn(),
@@ -15,6 +18,8 @@ jest.mock("./sync", () => ({
 
 jest.mock("./db", () => ({
   getUploadedFiles: jest.fn().mockResolvedValue([]),
+  clearPendingFiles: jest.fn().mockResolvedValue(undefined),
+  getResumableCount: jest.fn().mockResolvedValue(0),
 }));
 
 import express from "express";
@@ -22,12 +27,22 @@ import session from "express-session";
 import request from "supertest";
 import routes from "./routes";
 import { handleCallback } from "./auth";
-import { startSync, requestAbort, getSyncSnapshot } from "./sync";
+import {
+  startSync,
+  requestAbort,
+  getSyncSnapshot,
+  getSyncState,
+  pushSnapshot,
+} from "./sync";
+import { clearPendingFiles, getResumableCount } from "./db";
 
 const mockHandleCallback = handleCallback as jest.Mock;
 const mockStartSync = startSync as jest.Mock;
 const mockGetSyncSnapshot = getSyncSnapshot as jest.Mock;
-const mockRequestAbort = requestAbort as jest.Mock;
+const mockGetSyncState = getSyncState as jest.Mock;
+const mockPushSnapshot = pushSnapshot as jest.Mock;
+const mockClearPendingFiles = clearPendingFiles as jest.Mock;
+const mockGetResumableCount = getResumableCount as jest.Mock;
 
 // Creates a minimal Express app with session middleware.
 // Pass a userId to simulate an already-authenticated session.
@@ -46,7 +61,12 @@ function createApp(userId?: string) {
 }
 
 describe("POST /sync/start", () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // Default: no pending backlog. getResumableCount is only queried at all
+    // when folderId is omitted, so this only matters for those tests.
+    mockGetResumableCount.mockResolvedValue(0);
+  });
 
   it("returns 400 with an error message when a sync is already running", async () => {
     mockStartSync.mockRejectedValue(new Error("A sync is already running"));
@@ -55,6 +75,52 @@ describe("POST /sync/start", () => {
       .send({ folderId: "test-folder-id" });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("A sync is already running");
+    // A real folderId means getResumableCount never needs to be checked.
+    expect(mockGetResumableCount).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when there is no pending backlog and folderId is missing", async () => {
+    mockGetResumableCount.mockResolvedValue(0);
+    const res = await request(createApp("user-123"))
+      .post("/sync/start")
+      .send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("folderId is required");
+    expect(mockStartSync).not.toHaveBeenCalled();
+  });
+
+  it("starts a sync with folderId omitted when there is a pending backlog", async () => {
+    mockGetResumableCount.mockResolvedValue(5);
+    mockStartSync.mockResolvedValue(42);
+    const res = await request(createApp("user-123"))
+      .post("/sync/start")
+      .send({ driveAccessToken: "tok" });
+    expect(res.status).toBe(200);
+    expect(res.body.runId).toBe(42);
+    expect(mockStartSync).toHaveBeenCalledWith("user-123", true, null, "tok");
+  });
+});
+
+describe("POST /sync/pending/clear", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("clears pending files and pushes a fresh snapshot when idle", async () => {
+    mockGetSyncState.mockReturnValue({ status: "idle", runId: null, currentFile: null });
+    const res = await request(createApp("user-123")).post(
+      "/sync/pending/clear",
+    );
+    expect(res.status).toBe(200);
+    expect(mockClearPendingFiles).toHaveBeenCalledWith("user-123");
+    expect(mockPushSnapshot).toHaveBeenCalledWith("user-123");
+  });
+
+  it("rejects with 400 while a sync is running, without clearing anything", async () => {
+    mockGetSyncState.mockReturnValue({ status: "uploading", runId: 1, currentFile: "photo.jpg" });
+    const res = await request(createApp("user-123")).post(
+      "/sync/pending/clear",
+    );
+    expect(res.status).toBe(400);
+    expect(mockClearPendingFiles).not.toHaveBeenCalled();
   });
 });
 
@@ -122,7 +188,9 @@ describe("GET /auth/callback — auth errors redirect to FRONTEND_URL with a ban
 
   it("redirects to FRONTEND_URL (no error) on success", async () => {
     mockHandleCallback.mockResolvedValue("user-123");
-    const res = await request(createApp()).get("/auth/callback?code=valid-code");
+    const res = await request(createApp()).get(
+      "/auth/callback?code=valid-code",
+    );
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe(DEFAULT_FRONTEND);
   });

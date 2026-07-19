@@ -20,12 +20,16 @@ Why search through drive, hunting around for your old photos? This web app
 ## How it works
 
 1. You authenticate with Google via OAuth
-2. You use the Google Drive Picker to select a specific folder to sync
-3. The app discovers all image files in that folder (up to 10,000 with AI, up to 20,000 without)
+2. You use the Google Drive Picker to select a specific folder to sync — this mints a separate, short-lived Google Identity Services (GIS) token in the browser just for the picker/Drive calls, distinct from the backend's stored OAuth token
+3. The app discovers all image files in that folder (up to 10,000 with AI, up to 20,000 without) — skipped if you already have pending files from a previous sync (see [Sync lifecycle](#sync-lifecycle))
 4. Each file is downloaded and optionally sent to Gemini to generate a descriptive caption
 5. The file is uploaded to Google Photos with the caption attached
 6. Progress streams to the browser in real time over Server-Sent Events (SSE) — no polling
 7. Progress is tracked in Postgres — syncs are resumable and idempotent
+
+### Authorization tokens
+
+The Drive Picker and Drive API calls use a browser-minted GIS token (`google.accounts.oauth2.initTokenClient`), not the backend's stored OAuth token — `drive.file` scope authorization is tracked per-token-family, and using the backend token would make `files.list` return zero results even for folders you've already authorized. Minting a token and showing the folder-browser dialog are two separate steps: requesting a token silently (no popup) is enough to resume an existing sync, but picking a *new* folder requires the full picker dialog. `drive.file` grants persist per Google account, so a silently-minted token still has access to every folder you've previously picked.
 
 ## Local setup
 
@@ -114,6 +118,7 @@ npm run dev
 | `GET`  | `/sync/files`  | Returns list of already uploaded files                                                                                                                                                                                                                                                                                     |
 | `POST` | `/sync/start`  | Kicks off the sync process. Requires `folderId` (from the Picker) and accepts `useAI` (default `true`). Discovers photos in the selected folder, saves records to DB, optionally sends photos to Gemini for descriptions, then uploads to Google Photos one at a time. Capped at 10,000 files per sync with AI, 20,000 without. |
 | `POST` | `/sync/abort`  | Gracefully stops sync: immediately clears local memory and sets a flag so the loop stops after the current file finishes                                                                                                                                                                                                   |
+| `POST` | `/sync/pending/clear` | Drops the user's global pending backlog instead of processing it. Rejected with 400 while a sync is running, to avoid deleting rows out from under an in-flight upload batch.                                                                                                                                       |
 
 ### Health
 
@@ -164,6 +169,8 @@ npm run dev
 | `started_at`   | `BIGINT`  | Unix timestamp                                                  |
 | `completed_at` | `BIGINT`  | Unix timestamp; nullable                                        |
 
+> **Note:** `sync_runs`'s `total`/`uploaded`/`skipped`/`failed` are counts for *that one run* only. They're unrelated to the `fileCounts` object returned by `/sync/status` and `/sync/events`, which is always a fresh, live query of `drive_files` and represents all-time totals across every folder and run for that user — the two are not meant to match.
+
 ## Sync lifecycle
 
 Each file in `drive_files` moves through these states:
@@ -177,8 +184,9 @@ uninitialized → in_progress → uploaded
 At the start of each sync run:
 
 - Files stuck in `in_progress` (e.g. from a crash) are reset to `uninitialized` (across all folders, as a crash-recovery safety net)
-- The selected folder's `uninitialized` files are deleted so it's re-discovered fresh — this prevents stale entries from a previous run of the *same* folder from lingering
-- `failed` files are left in place and retried automatically (up to 3 attempts) on the next sync of that folder — they are not cleared
+- **Discovery is conditional:** if you already have `uninitialized` (pending) files from a previous sync — in *any* folder, not just the one just picked — discovery is skipped entirely and the sync goes straight to uploading that backlog. Discovery (and picking a folder) only happens once the backlog is empty.
+- `failed` files are left in place and retried automatically (up to 3 attempts) on the next sync — they are not cleared, and are picked up from any folder the same way pending files are
+- This combination is what makes resuming after a page refresh work without ever needing to re-pick the original folder — the app doesn't need to remember which folder you were syncing, only that a backlog exists
 
 ## Real-time updates (SSE)
 

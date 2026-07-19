@@ -10,9 +10,10 @@ exports.markFileInProgress = markFileInProgress;
 exports.updateFileStatus = updateFileStatus;
 exports.resetStuckFiles = resetStuckFiles;
 exports.clearFailedFiles = clearFailedFiles;
-exports.clearUninitializedFiles = clearUninitializedFiles;
+exports.clearPendingFiles = clearPendingFiles;
 exports.getUninitializedFiles = getUninitializedFiles;
 exports.getFileCounts = getFileCounts;
+exports.getResumableCount = getResumableCount;
 exports.createSyncRun = createSyncRun;
 exports.updateSyncRun = updateSyncRun;
 exports.getUploadedFiles = getUploadedFiles;
@@ -132,22 +133,30 @@ async function resetStuckFiles(userId) {
 async function clearFailedFiles(userId, folderId) {
     await (0, exports.query)(`DELETE FROM drive_files WHERE user_id = $1 AND folder_id = $2 AND status = 'failed'`, [userId, folderId]);
 }
-// Clear uninitialized files for this folder before discovery re-populates them
-async function clearUninitializedFiles(userId, folderId) {
-    await (0, exports.query)(`DELETE FROM drive_files WHERE user_id = $1 AND folder_id = $2 AND status = 'uninitialized'`, [userId, folderId]);
+// Clear all pending (never-uploaded) files for this user, across every folder —
+// a deliberate "drop the backlog" action, not called automatically during sync.
+async function clearPendingFiles(userId) {
+    await (0, exports.query)(`DELETE FROM drive_files WHERE user_id = $1 AND status = 'uninitialized'`, [userId]);
 }
 // Pick up uninitialized files and failed files that haven't exceeded the retry limit,
-// scoped to the current folder so cross-folder failures don't bleed in.
-async function getUninitializedFiles(userId, folderId) {
+// across all of the user's folders — this is one global work queue, not scoped
+// to whichever folder is currently selected in the Picker.
+async function getUninitializedFiles(userId) {
     const result = await (0, exports.query)(`SELECT * FROM drive_files
-     WHERE user_id = $1 AND folder_id = $2
+     WHERE user_id = $1
        AND (status = 'uninitialized' OR (status = 'failed' AND retry_count < 3))
-     LIMIT 50`, [userId, folderId]);
+     LIMIT 50`, [userId]);
     return result.rows;
 }
 async function getFileCounts(userId) {
     const result = await (0, exports.query)(`SELECT status, COUNT(*) as count FROM drive_files WHERE user_id = $1 GROUP BY status`, [userId]);
     return result.rows;
+}
+async function getResumableCount(userId) {
+    const result = await (0, exports.query)(`SELECT COUNT(*) as count FROM drive_files
+     WHERE user_id = $1
+       AND (status = 'uninitialized' OR (status = 'failed' AND retry_count < 3))`, [userId]);
+    return Number(result.rows[0]?.count ?? 0);
 }
 // RETURNING id is how pg gives you back the auto-generated SERIAL id after an insert
 async function createSyncRun(userId) {

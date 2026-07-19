@@ -60,14 +60,20 @@ function requireAuth(req, res, next) {
 // ── Sync ──────────────────────────────────────────────────────────────────────
 router.post("/sync/start", requireAuth, async (req, res) => {
     try {
+        const userId = req.userId;
         const useAI = req.body?.useAI !== false; // default true
-        const folderId = req.body?.folderId;
+        const folderId = req.body?.folderId ?? null;
         const driveAccessToken = req.body?.driveAccessToken;
-        if (!folderId) {
-            res.status(400).json({ error: "folderId is required" });
-            return;
+        // Only worth checking when folderId was actually omitted — a real
+        // folderId always means "discover this specific folder," backlog or not.
+        if (folderId === null) {
+            const resumableCount = await (0, db_1.getResumableCount)(userId);
+            if (resumableCount === 0) {
+                res.status(400).json({ error: "folderId is required" });
+                return;
+            }
         }
-        const runId = await (0, sync_1.startSync)(req.userId, useAI, folderId, driveAccessToken);
+        const runId = await (0, sync_1.startSync)(userId, useAI, folderId, driveAccessToken);
         res.json({ runId, message: "Sync started" });
     }
     catch (err) {
@@ -79,6 +85,19 @@ router.post("/sync/abort", requireAuth, (req, res) => {
     res.json({
         message: "Abort signal sent — current file will finish then sync will stop",
     });
+});
+router.post("/sync/pending/clear", requireAuth, async (req, res) => {
+    const userId = req.userId;
+    const { status } = (0, sync_1.getSyncState)(userId);
+    if (status === "discovering" || status === "uploading") {
+        res.status(400).json({
+            error: "Cannot clear pending files while a sync is running.",
+        });
+        return;
+    }
+    await (0, db_1.clearPendingFiles)(userId);
+    await (0, sync_1.pushSnapshot)(userId);
+    res.json({ message: "Pending files cleared" });
 });
 router.get("/sync/status", requireAuth, async (req, res) => {
     const userId = req.userId;

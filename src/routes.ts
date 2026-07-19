@@ -4,11 +4,12 @@ import {
   startSync,
   requestAbort,
   getSyncSnapshot,
+  getSyncState,
   addSyncClient,
   removeSyncClient,
   pushSnapshot,
 } from "./sync";
-import { getUploadedFiles } from "./db";
+import { getUploadedFiles, clearPendingFiles, getResumableCount } from "./db";
 
 const router = Router();
 
@@ -73,14 +74,21 @@ function requireAuth(req: Request, res: Response, next: Function) {
 
 router.post("/sync/start", requireAuth, async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).userId;
     const useAI = req.body?.useAI !== false; // default true
-    const folderId = req.body?.folderId as string;
+    const folderId = (req.body?.folderId as string | null | undefined) ?? null;
     const driveAccessToken = req.body?.driveAccessToken as string | undefined;
-    if (!folderId) {
-      res.status(400).json({ error: "folderId is required" });
-      return;
+
+    // Only worth checking when folderId was actually omitted — a real
+    // folderId always means "discover this specific folder," backlog or not.
+    if (folderId === null) {
+      const resumableCount = await getResumableCount(userId);
+      if (resumableCount === 0) {
+        res.status(400).json({ error: "folderId is required" });
+        return;
+      }
     }
-    const runId = await startSync((req as any).userId, useAI, folderId, driveAccessToken);
+    const runId = await startSync(userId, useAI, folderId, driveAccessToken);
     res.json({ runId, message: "Sync started" });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -93,6 +101,23 @@ router.post("/sync/abort", requireAuth, (req: Request, res: Response) => {
     message: "Abort signal sent — current file will finish then sync will stop",
   });
 });
+router.post(
+  "/sync/pending/clear",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { status } = getSyncState(userId);
+    if (status === "discovering" || status === "uploading") {
+      res.status(400).json({
+        error: "Cannot clear pending files while a sync is running.",
+      });
+      return;
+    }
+    await clearPendingFiles(userId);
+    await pushSnapshot(userId);
+    res.json({ message: "Pending files cleared" });
+  },
+);
 
 router.get("/sync/status", requireAuth, async (req: Request, res: Response) => {
   const userId = (req as any).userId;
@@ -129,20 +154,24 @@ router.get("/sync/files", requireAuth, async (req: Request, res: Response) => {
   res.json({ files });
 });
 
-router.get("/picker/config", requireAuth, async (req: Request, res: Response) => {
-  const userId = (req as any).userId;
-  const auth = await getAuthClient(userId);
-  const { credentials } = await auth.refreshAccessToken();
-  const token = credentials.access_token;
-  if (!token) {
-    res.status(401).json({ error: "token_expired" });
-    return;
-  }
-  res.json({
-    access_token: token,
-    client_id: process.env.GOOGLE_CLIENT_ID,
-    api_key: process.env.GOOGLE_API_KEY,
-  });
-});
+router.get(
+  "/picker/config",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const auth = await getAuthClient(userId);
+    const { credentials } = await auth.refreshAccessToken();
+    const token = credentials.access_token;
+    if (!token) {
+      res.status(401).json({ error: "token_expired" });
+      return;
+    }
+    res.json({
+      access_token: token,
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      api_key: process.env.GOOGLE_API_KEY,
+    });
+  },
+);
 
 export default router;
