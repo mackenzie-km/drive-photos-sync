@@ -8,6 +8,7 @@ const IDLE_STATUS = {
   runId: null,
   latestRun: null,
   fileCounts: {},
+  resumableCount: 0,
 };
 
 // Minimal EventSource stub: on construction, waits a microtask (so the
@@ -414,6 +415,57 @@ describe("MainPage", () => {
     });
   });
 
+  it("re-mints a fresh token instead of reusing one older than 50 minutes", async () => {
+    let currentTime = 1_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => currentTime);
+
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url === "/picker/config")
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ access_token: "tok", api_key: "key" }),
+        } as Response);
+      if (url === "/sync/start")
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ runId: 1 }),
+        } as Response);
+      throw new Error(`Unexpected fetch: ${url} ${init?.method ?? "GET"}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { triggerPick } = setupPickerMock();
+
+    render(<MainPage />);
+    await waitFor(() =>
+      screen.getByRole("button", { name: /choose folder/i }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /choose folder/i }));
+    await waitFor(() => {
+      triggerPick("folder-1", "My Photos");
+      expect(screen.getByRole("button", { name: /start/i })).toBeEnabled();
+    });
+
+    // Past the 50-minute staleness window — handleStartSync should silently
+    // re-mint rather than reuse the token from the pick above.
+    currentTime += 51 * 60 * 1000;
+    fireEvent.click(screen.getByRole("button", { name: /start/i }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([url]) => url === "/sync/start"),
+      ).toBe(true);
+    });
+
+    // /picker/config is fetched once by openPicker and, if re-minting
+    // happened, once more by getDriveToken.
+    const pickerConfigCalls = fetchMock.mock.calls.filter(
+      ([url]) => url === "/picker/config",
+    );
+    expect(pickerConfigCalls.length).toBe(2);
+
+    nowSpy.mockRestore();
+  });
+
   it("shows an error banner when loading uploaded files fails", async () => {
     vi.stubGlobal(
       "fetch",
@@ -444,7 +496,7 @@ describe("MainPage", () => {
 
   // ── Pending-backlog resume (no folder re-selection required) ──────────────
   it("enables Resume Sync with no folder selected when there is a pending backlog", async () => {
-    stubEventSource({ ...IDLE_STATUS, fileCounts: { uninitialized: 5 } });
+    stubEventSource({ ...IDLE_STATUS, resumableCount: 5 });
     stubFetch();
 
     render(<MainPage />);
@@ -457,7 +509,7 @@ describe("MainPage", () => {
   });
 
   it("silently mints a token and resumes without opening the folder picker", async () => {
-    stubEventSource({ ...IDLE_STATUS, fileCounts: { uninitialized: 5 } });
+    stubEventSource({ ...IDLE_STATUS, resumableCount: 5 });
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
       if (url === "/picker/config")
         return Promise.resolve({
@@ -490,7 +542,7 @@ describe("MainPage", () => {
   });
 
   it("shows a reconnect error and does not start a sync when the silent token request fails", async () => {
-    stubEventSource({ ...IDLE_STATUS, fileCounts: { uninitialized: 5 } });
+    stubEventSource({ ...IDLE_STATUS, resumableCount: 5 });
     const fetchMock = vi.fn((url: string) => {
       if (url === "/picker/config")
         return Promise.resolve({

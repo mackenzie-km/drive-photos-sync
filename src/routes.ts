@@ -4,11 +4,12 @@ import {
   startSync,
   requestAbort,
   getSyncSnapshot,
+  getSyncState,
   addSyncClient,
   removeSyncClient,
   pushSnapshot,
 } from "./sync";
-import { getUploadedFiles, clearPendingFiles } from "./db";
+import { getUploadedFiles, clearPendingFiles, getResumableCount } from "./db";
 
 const router = Router();
 
@@ -78,11 +79,14 @@ router.post("/sync/start", requireAuth, async (req: Request, res: Response) => {
     const folderId = (req.body?.folderId as string | null | undefined) ?? null;
     const driveAccessToken = req.body?.driveAccessToken as string | undefined;
 
-    const snapshot = await getSyncSnapshot(userId);
-    const pendingCount = Number(snapshot.fileCounts?.uninitialized ?? 0);
-    if (pendingCount === 0 && !folderId) {
-      res.status(400).json({ error: "folderId is required" });
-      return;
+    // Only worth checking when folderId was actually omitted — a real
+    // folderId always means "discover this specific folder," backlog or not.
+    if (folderId === null) {
+      const resumableCount = await getResumableCount(userId);
+      if (resumableCount === 0) {
+        res.status(400).json({ error: "folderId is required" });
+        return;
+      }
     }
     const runId = await startSync(userId, useAI, folderId, driveAccessToken);
     res.json({ runId, message: "Sync started" });
@@ -102,8 +106,8 @@ router.post(
   requireAuth,
   async (req: Request, res: Response) => {
     const userId = (req as any).userId;
-    const snapshot = await getSyncSnapshot(userId);
-    if (snapshot.status === "discovering" || snapshot.status === "uploading") {
+    const { status } = getSyncState(userId);
+    if (status === "discovering" || status === "uploading") {
       res.status(400).json({
         error: "Cannot clear pending files while a sync is running.",
       });

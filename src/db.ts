@@ -196,6 +196,15 @@ export async function getFileCounts(userId: string) {
   );
   return result.rows as { status: string; count: number }[];
 }
+export async function getResumableCount(userId: string): Promise<number> {
+  const result = await query(
+    `SELECT COUNT(*) as count FROM drive_files
+     WHERE user_id = $1
+       AND (status = 'uninitialized' OR (status = 'failed' AND retry_count < 3))`,
+    [userId],
+  );
+  return Number(result.rows[0]?.count ?? 0);
+}
 
 // RETURNING id is how pg gives you back the auto-generated SERIAL id after an insert
 export async function createSyncRun(userId: string): Promise<number> {

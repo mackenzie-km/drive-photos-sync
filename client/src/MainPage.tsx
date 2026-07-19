@@ -27,6 +27,7 @@ interface SyncStatus {
     failed?: number;
     skipped?: number;
   };
+  resumableCount: number;
 }
 
 interface UploadedFile {
@@ -50,15 +51,26 @@ const STATUS_LABEL: Record<string, string> = {
 const IS_RUNNING = (status: string) =>
   status === "discovering" || status === "uploading";
 
+const TOKEN_MAX_AGE_MS = 50 * 60 * 1000;
+
+function createTokenClient(
+  clientId: string,
+  callback: (response: any) => void,
+) {
+  return (window as any).google.accounts.oauth2.initTokenClient({
+    client_id: clientId,
+    scope: "https://www.googleapis.com/auth/drive.file",
+    callback,
+  });
+}
+
 async function getDriveToken(): Promise<string | null> {
   const res = await fetch("/picker/config");
   const { client_id } = await res.json();
   return new Promise((resolve) => {
-    const tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
-      client_id,
-      scope: "https://www.googleapis.com/auth/drive.file",
-      callback: (response: any) => resolve(response.access_token ?? null),
-    });
+    const tokenClient = createTokenClient(client_id, (response: any) =>
+      resolve(response.access_token ?? null),
+    );
     tokenClient.requestAccessToken({ prompt: "" });
   });
 }
@@ -72,6 +84,7 @@ export default function MainPage() {
   const [folderId, setFolderId] = useState<string | null>(null);
   const [folderName, setFolderName] = useState<string | null>(null);
   const [driveAccessToken, setDriveAccessToken] = useState<string | null>(null);
+  const [tokenMintedAt, setTokenMintedAt] = useState<number | null>(null);
   const [aborting, setAborting] = useState(false);
 
   useEffect(() => {
@@ -103,16 +116,22 @@ export default function MainPage() {
   }
 
   async function handleStartSync() {
-    const pendingCount = Number(syncStatus?.fileCounts?.uninitialized ?? 0);
+    const canResume = Number(syncStatus?.resumableCount ?? 0) > 0;
 
-    if (pendingCount === 0 && !folderId) {
+    if (!canResume && !folderId) {
       setError("Select a folder first.");
       return;
     }
 
-    let token = driveAccessToken;
+    const tokenStale =
+      tokenMintedAt !== null && Date.now() - tokenMintedAt > TOKEN_MAX_AGE_MS;
+    let token = tokenStale ? null : driveAccessToken;
     if (!token) {
-      token = await getDriveToken();
+      try {
+        token = await getDriveToken();
+      } catch {
+        token = null;
+      }
       if (!token) {
         setError(
           'Could not reconnect to Drive automatically. Click "Select a Folder" to reconnect, then try again.',
@@ -120,6 +139,7 @@ export default function MainPage() {
         return;
       }
       setDriveAccessToken(token);
+      setTokenMintedAt(Date.now());
     }
 
     try {
@@ -178,33 +198,30 @@ export default function MainPage() {
     const res = await fetch("/picker/config");
     const { client_id, api_key } = await res.json();
 
-    const tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
-      client_id,
-      scope: "https://www.googleapis.com/auth/drive.file",
-      callback: (response: any) => {
-        const access_token = response.access_token;
-        if (!access_token) return;
+    const tokenClient = createTokenClient(client_id, (response: any) => {
+      const access_token = response.access_token;
+      if (!access_token) return;
 
-        (window as any).gapi.load("picker", () => {
-          const gp = (window as any).google.picker;
-          const folderView = new gp.DocsView()
-            .setIncludeFolders(true)
-            .setSelectFolderEnabled(true)
-            .setMimeTypes("application/vnd.google-apps.folder");
-          let builder = new gp.PickerBuilder()
-            .addView(folderView)
-            .setOAuthToken(access_token)
-            .setCallback((data: any) => {
-              if (data.action === gp.Action.PICKED) {
-                setFolderId(data.docs[0].id);
-                setFolderName(data.docs[0].name);
-                setDriveAccessToken(access_token);
-              }
-            });
-          if (api_key) builder = builder.setDeveloperKey(api_key);
-          builder.build().setVisible(true);
-        });
-      },
+      (window as any).gapi.load("picker", () => {
+        const gp = (window as any).google.picker;
+        const folderView = new gp.DocsView()
+          .setIncludeFolders(true)
+          .setSelectFolderEnabled(true)
+          .setMimeTypes("application/vnd.google-apps.folder");
+        let builder = new gp.PickerBuilder()
+          .addView(folderView)
+          .setOAuthToken(access_token)
+          .setCallback((data: any) => {
+            if (data.action === gp.Action.PICKED) {
+              setFolderId(data.docs[0].id);
+              setFolderName(data.docs[0].name);
+              setDriveAccessToken(access_token);
+              setTokenMintedAt(Date.now());
+            }
+          });
+        if (api_key) builder = builder.setDeveloperKey(api_key);
+        builder.build().setVisible(true);
+      });
     });
     tokenClient.requestAccessToken({ prompt: "" });
   }
@@ -225,6 +242,7 @@ export default function MainPage() {
   const progress = total > 0 ? Math.round((uploaded / total) * 100) : 0;
   const status = syncStatus?.status ?? "idle";
   const currentFile = syncStatus?.currentFile ?? null;
+  const canResume = Number(syncStatus?.resumableCount ?? 0) > 0;
 
   useEffect(() => {
     // Abort takes a moment (the in-flight file finishes first) — once the
@@ -287,12 +305,10 @@ export default function MainPage() {
                   </button>
                 )}
                 <button
-                  disabled={!folderId && (counts.uninitialized ?? 0) === 0}
+                  disabled={!folderId && !canResume}
                   onClick={handleStartSync}
                 >
-                  {!folderId && (counts.uninitialized ?? 0) > 0
-                    ? "▶ Resume"
-                    : "▶ Start"}
+                  {!folderId && canResume ? "▶ Resume" : "▶ Start"}
                 </button>
               </>
             )}

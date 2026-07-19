@@ -4,7 +4,9 @@ jest.mock("./auth", () => ({
 
 jest.mock("./drive", () => ({
   listDrivePhotos: jest.fn(),
-  downloadDriveFile: jest.fn().mockResolvedValue(Buffer.from("fake-image-data")),
+  downloadDriveFile: jest
+    .fn()
+    .mockResolvedValue(Buffer.from("fake-image-data")),
 }));
 
 jest.mock("./gemini", () => ({
@@ -25,6 +27,7 @@ jest.mock("./db", () => ({
   createSyncRun: jest.fn().mockResolvedValue(1),
   updateSyncRun: jest.fn().mockResolvedValue(undefined),
   getFileCounts: jest.fn().mockResolvedValue([]),
+  getResumableCount: jest.fn().mockResolvedValue(0),
   getMd5Uploaded: jest.fn().mockResolvedValue(null),
   getLatestSyncRun: jest.fn().mockResolvedValue(null),
 }));
@@ -47,6 +50,7 @@ import {
   clearFailedFiles,
   getLatestSyncRun,
   getFileCounts,
+  getResumableCount,
 } from "./db";
 import { listDrivePhotos, downloadDriveFile } from "./drive";
 import { uploadPhoto } from "./photos";
@@ -90,7 +94,10 @@ describe("getSyncSnapshot — stale run correction", () => {
   });
 
   it("marks a running run as failed when there is no active in-memory sync", async () => {
-    mockGetLatestSyncRun.mockResolvedValue({ status: "running", started_at: now - 60 });
+    mockGetLatestSyncRun.mockResolvedValue({
+      status: "running",
+      started_at: now - 60,
+    });
 
     const snapshot = await getSyncSnapshot("user-snapshot-idle");
     expect(snapshot.latestRun.status).toBe("failed");
@@ -112,7 +119,10 @@ describe("getSyncSnapshot — stale run correction", () => {
 
   it("leaves a running run alone when a sync is active and within the timeout", async () => {
     await startSync("user-snapshot-active", true, "folder-x");
-    mockGetLatestSyncRun.mockResolvedValue({ status: "running", started_at: now - 60 });
+    mockGetLatestSyncRun.mockResolvedValue({
+      status: "running",
+      started_at: now - 60,
+    });
 
     const snapshot = await getSyncSnapshot("user-snapshot-active");
     expect(snapshot.latestRun.status).toBe("running");
@@ -192,9 +202,9 @@ describe("startSync — concurrent guard", () => {
 
   it("rejects a second startSync before the first has resolved", async () => {
     const p1 = startSync("user-concurrent", true, "folder-1");
-    await expect(startSync("user-concurrent", true, "folder-1")).rejects.toThrow(
-      "A sync is already running",
-    );
+    await expect(
+      startSync("user-concurrent", true, "folder-1"),
+    ).rejects.toThrow("A sync is already running");
     await p1;
     await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
   });
@@ -224,7 +234,13 @@ describe("startSync — folderId plumbing", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockListDrivePhotos.mockImplementation(async function* () {
-      yield { id: "file-1", name: "photo.jpg", md5: "abc", mime_type: "image/jpeg", size: 1024 };
+      yield {
+        id: "file-1",
+        name: "photo.jpg",
+        md5: "abc",
+        mime_type: "image/jpeg",
+        size: 1024,
+      };
     });
     mockGetUninitializedFiles.mockResolvedValue([]);
   });
@@ -234,7 +250,13 @@ describe("startSync — folderId plumbing", () => {
     await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
 
     expect(mockUpsertDriveFile).toHaveBeenCalledWith(
-      "file-1", "user-folder", "folder-xyz", "photo.jpg", "abc", "image/jpeg", 1024,
+      "file-1",
+      "user-folder",
+      "folder-xyz",
+      "photo.jpg",
+      "abc",
+      "image/jpeg",
+      1024,
     );
   });
 
@@ -258,7 +280,7 @@ describe("startSync — pending resume (discovery skip)", () => {
     jest.clearAllMocks();
     mockListDrivePhotos.mockImplementation(async function* () {
       yield {
-        id: "should-not-be-discovered",
+        id: "new-file",
         name: "new-file.jpg",
         md5: "new",
         mime_type: "image/jpeg",
@@ -267,14 +289,7 @@ describe("startSync — pending resume (discovery skip)", () => {
     });
   });
 
-  afterEach(() => {
-    // Restore the module's default so this override never leaks into other
-    // describe blocks that don't set their own getFileCounts expectation.
-    mockGetFileCounts.mockResolvedValue([]);
-  });
-
-  it("skips discovery entirely and resumes across folders when pending files already exist", async () => {
-    mockGetFileCounts.mockResolvedValue([{ status: "uninitialized", count: 3 }]);
+  it("skips discovery entirely and resumes across folders when folderId is null", async () => {
     mockGetUninitializedFiles
       .mockResolvedValueOnce([FILE])
       .mockResolvedValue([]);
@@ -295,14 +310,32 @@ describe("startSync — pending resume (discovery skip)", () => {
     );
   });
 
-  it("runs discovery normally when there are no pending files", async () => {
-    mockGetFileCounts.mockResolvedValue([]);
+  it("runs discovery normally when a folderId is provided", async () => {
     mockGetUninitializedFiles.mockResolvedValue([]);
 
     await startSync("user-resume-2", true, "folder-xyz");
     await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
 
-    expect(mockListDrivePhotos).toHaveBeenCalledWith(expect.anything(), "folder-xyz");
+    expect(mockListDrivePhotos).toHaveBeenCalledWith(
+      expect.anything(),
+      "folder-xyz",
+    );
+    expect(mockUpsertDriveFile).toHaveBeenCalled();
+  });
+
+  it("runs discovery for a newly-provided folderId even when a backlog exists in other folders", async () => {
+    mockGetFileCounts.mockResolvedValue([
+      { status: "uninitialized", count: 40 },
+    ]);
+    mockGetUninitializedFiles.mockResolvedValue([]);
+
+    await startSync("user-resume-3", true, "brand-new-folder");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockListDrivePhotos).toHaveBeenCalledWith(
+      expect.anything(),
+      "brand-new-folder",
+    );
     expect(mockUpsertDriveFile).toHaveBeenCalled();
   });
 });
@@ -425,12 +458,15 @@ describe("startSync — upload error paths", () => {
       .mockResolvedValue([]);
 
     // A 500 error (not retried by withRetry) with a structured response body
-    const apiError = Object.assign(new Error("Request failed with status 500"), {
-      response: {
-        status: 500,
-        data: { error: { errors: [{ reason: "backendError" }] } },
+    const apiError = Object.assign(
+      new Error("Request failed with status 500"),
+      {
+        response: {
+          status: 500,
+          data: { error: { errors: [{ reason: "backendError" }] } },
+        },
       },
-    });
+    );
     mockUploadPhoto.mockRejectedValueOnce(apiError);
 
     await startSync("user-err-axios", false, "folder-id");
@@ -502,7 +538,13 @@ describe("startSync — limit_reached", () => {
     const MAX = 10_000; // useAI=true → MAX_PER_SYNC = 10_000
     mockListDrivePhotos.mockImplementation(async function* () {
       for (let i = 0; i <= MAX; i++) {
-        yield { id: `file-${i}`, name: `photo${i}.jpg`, md5: `md5-${i}`, mime_type: "image/jpeg", size: 1024 };
+        yield {
+          id: `file-${i}`,
+          name: `photo${i}.jpg`,
+          md5: `md5-${i}`,
+          mime_type: "image/jpeg",
+          size: 1024,
+        };
       }
     });
     mockGetUninitializedFiles.mockResolvedValue([]);
@@ -576,15 +618,9 @@ describe("startSync — crash mid-sync (SSE terminal push)", () => {
       };
       throw new Error("token expired");
     });
-
-    // The first call is runSync's pre-discovery pending check (must be empty
-    // so discovery actually runs and hits the simulated crash below); every
-    // call after that — including finishRun's terminal query — reflects what
-    // a live query against drive_files would actually return post-crash,
-    // independent of finishRun's zeroed-out args.
-    mockGetFileCounts
-      .mockResolvedValueOnce([])
-      .mockResolvedValue([{ status: "uninitialized", count: 1 }]);
+    mockGetFileCounts.mockResolvedValue([
+      { status: "uninitialized", count: 1 },
+    ]);
 
     const fakeClient = { write: jest.fn() };
     addSyncClient("user-crash-1", fakeClient as any);

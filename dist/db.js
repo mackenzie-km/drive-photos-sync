@@ -13,6 +13,7 @@ exports.clearFailedFiles = clearFailedFiles;
 exports.clearPendingFiles = clearPendingFiles;
 exports.getUninitializedFiles = getUninitializedFiles;
 exports.getFileCounts = getFileCounts;
+exports.getResumableCount = getResumableCount;
 exports.createSyncRun = createSyncRun;
 exports.updateSyncRun = updateSyncRun;
 exports.getUploadedFiles = getUploadedFiles;
@@ -150,6 +151,12 @@ async function getUninitializedFiles(userId) {
 async function getFileCounts(userId) {
     const result = await (0, exports.query)(`SELECT status, COUNT(*) as count FROM drive_files WHERE user_id = $1 GROUP BY status`, [userId]);
     return result.rows;
+}
+async function getResumableCount(userId) {
+    const result = await (0, exports.query)(`SELECT COUNT(*) as count FROM drive_files
+     WHERE user_id = $1
+       AND (status = 'uninitialized' OR (status = 'failed' AND retry_count < 3))`, [userId]);
+    return Number(result.rows[0]?.count ?? 0);
 }
 // RETURNING id is how pg gives you back the auto-generated SERIAL id after an insert
 async function createSyncRun(userId) {

@@ -9,6 +9,7 @@ import {
   resetStuckFiles,
   upsertDriveFile,
   getUninitializedFiles,
+  getResumableCount,
   clearPendingFiles,
   clearFailedFiles,
 } from "./db";
@@ -52,6 +53,26 @@ describe("getUninitializedFiles", () => {
 
     const [sql] = mockQuery.mock.calls[0];
     expect(sql).toContain("retry_count < 3");
+  });
+});
+
+describe("getResumableCount", () => {
+  beforeEach(() => mockQuery.mockClear());
+
+  it("uses the same status filter as getUninitializedFiles — global, uninitialized OR retryable failed", async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [{ count: "7" }] });
+    const result = await getResumableCount("user-1");
+
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).not.toContain("folder_id");
+    expect(sql).toContain("retry_count < 3");
+    expect(params).toEqual(["user-1"]);
+    expect(result).toBe(7);
+  });
+
+  it("returns 0 when there are no matching rows", async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [{ count: "0" }] });
+    expect(await getResumableCount("user-1")).toBe(0);
   });
 });
 

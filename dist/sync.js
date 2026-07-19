@@ -33,6 +33,16 @@ function requestAbort(userId) {
         userSyncState.delete(userId);
     }
 }
+async function getCountsPayload(userId) {
+    const [countsRaw, resumableCount] = await Promise.all([
+        (0, db_1.getFileCounts)(userId),
+        (0, db_1.getResumableCount)(userId),
+    ]);
+    return {
+        fileCounts: Object.fromEntries(countsRaw.map((r) => [r.status, r.count])),
+        resumableCount,
+    };
+}
 // Full snapshot — same shape /sync/status has always returned, including the
 // crash-recovery correction (no in-memory state, or a run stuck past the
 // timeout, gets reported as failed). Used for the one-shot REST endpoint and
@@ -40,8 +50,7 @@ function requestAbort(userId) {
 async function getSyncSnapshot(userId) {
     const state = getSyncState(userId);
     const latestRun = await (0, db_1.getLatestSyncRun)(userId);
-    const countsRaw = await (0, db_1.getFileCounts)(userId);
-    const fileCounts = Object.fromEntries(countsRaw.map((r) => [r.status, r.count]));
+    const { fileCounts, resumableCount } = await getCountsPayload(userId);
     if (latestRun?.status === "running") {
         const noActiveSync = state.status === "idle";
         const isStale = Math.floor(Date.now() / 1000) - latestRun.started_at > SYNC_TIMEOUT_SECS;
@@ -52,7 +61,7 @@ async function getSyncSnapshot(userId) {
             latestRun.error = "Sync was interrupted. Start a new sync to resume.";
         }
     }
-    return { ...state, latestRun: latestRun ?? null, fileCounts };
+    return { ...state, latestRun: latestRun ?? null, fileCounts, resumableCount };
 }
 // ── SSE ───────────────────────────────────────────────────────────────────────
 // Per-user set of open SSE connections. In-memory, single-process — a sync
@@ -89,13 +98,14 @@ function pushProgress(userId) {
     if (now - (lastProgressPushAt.get(userId) ?? 0) < 1000)
         return;
     lastProgressPushAt.set(userId, now);
-    (0, db_1.getFileCounts)(userId)
-        .then((countsRaw) => {
+    getCountsPayload(userId)
+        .then(({ fileCounts, resumableCount }) => {
         const payload = JSON.stringify({
             runId: state.runId,
             status: state.status,
             currentFile: state.currentFile,
-            fileCounts: Object.fromEntries(countsRaw.map((r) => [r.status, r.count])),
+            fileCounts,
+            resumableCount,
         });
         for (const res of clients)
             res.write(`data: ${payload}\n\n`);
@@ -139,13 +149,11 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
     // Cap per sync run — only applies when AI is on (Gemini adds time per file)
     const MAX_PER_SYNC = useAI ? 10_000 : 20_000;
     // ── Phase 1: discover ──────────────────────────────────────────────────────
-    // Skipped entirely when the user already has pending files anywhere
-    const countsBeforeDiscovery = await (0, db_1.getFileCounts)(userId);
-    const pendingCount = Number(countsBeforeDiscovery.find((r) => r.status === "uninitialized")?.count ?? 0);
+    // Skipped entirely when the caller passed no folderId
     let discovered = 0;
     let limitReached = false;
-    if (pendingCount > 0) {
-        console.log(`[sync:${userId}] Found ${pendingCount} pending files across all folders — skipping discovery.`);
+    if (folderId === null) {
+        console.log(`[sync:${userId}] No folder specified — resuming existing backlog across all folders.`);
     }
     else {
         state.status = "discovering";
@@ -242,13 +250,14 @@ function finishRun(userId, runId, status, total, uploaded, skipped, failed) {
         state.status = status;
     const clients = userSyncClients.get(userId);
     if (clients && clients.size > 0) {
-        (0, db_1.getFileCounts)(userId)
-            .then((countsRaw) => {
+        getCountsPayload(userId)
+            .then(({ fileCounts, resumableCount }) => {
             const payload = JSON.stringify({
                 runId,
                 status,
                 currentFile: null,
-                fileCounts: Object.fromEntries(countsRaw.map((r) => [r.status, r.count])),
+                fileCounts,
+                resumableCount,
             });
             for (const res of clients)
                 res.write(`data: ${payload}\n\n`);
