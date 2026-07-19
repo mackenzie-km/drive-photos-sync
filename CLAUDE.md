@@ -24,6 +24,8 @@ npm run test:watch # vitest watch
 
 The pre-commit hook runs `npm run build` and stages `dist/`. Render serves the compiled output. Do not skip the hook.
 
+The pre-commit hook also best-effort auto-logs one line to `DECISIONS.md` per commit (via `scripts/log-decision.js`) when the staged diff looks like a real design/behavior decision — trivial commits (wording, formatting, docs) are skipped. The hook itself lives only in `.git/hooks/pre-commit`, not tracked by git, matching how the build-stage hook was already set up before this existed. For backfilling history or manually reviewing/logging a decision, use the `decision-log` skill (global, `~/.claude/skills/decision-log/SKILL.md` — not part of this repo).
+
 ## Architecture
 
 - **Backend**: Node/Express (`src/`) — OAuth, Drive discovery, Gemini, Photos upload
