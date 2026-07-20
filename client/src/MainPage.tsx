@@ -282,7 +282,7 @@ export default function MainPage() {
               <span className="status-heading-bar" />
             </span>
           </div>
-          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <div className="action-buttons">
             {IS_RUNNING(status) ? (
               <button
                 className="btn-secondary"
