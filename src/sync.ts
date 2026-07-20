@@ -28,7 +28,19 @@ type SyncStatus =
   | "done"
   | "failed"
   | "aborted"
-  | "limit_reached";
+  | "limit_reached"
+  | "token_expired";
+
+// The Drive-side driveAuth client is built once per run from a token that
+// can't be refreshed mid-flight (see createClientFromToken in auth.ts). Once
+// it expires, every remaining drive.files.get call fails the same way — so
+// treat the first one as a signal to stop the whole run rather than burning
+// through the rest of the queue as one-by-one permanent failures.
+function isDriveAuthError(err: any): boolean {
+  const status = err?.code ?? err?.response?.status;
+  const reason = err?.response?.data?.error?.errors?.[0]?.reason;
+  return status === 401 || reason === "authError";
+}
 
 // Per-user sync state — keyed by userId so concurrent users don't interfere
 const userSyncState = new Map<
@@ -251,8 +263,9 @@ async function runSync(
   let uploaded = 0,
     skipped = 0,
     failed = 0;
+  let driveTokenExpired = false;
 
-  while (!state.shouldAbort && !limitReached) {
+  while (!state.shouldAbort && !limitReached && !driveTokenExpired) {
     const batch = await getUninitializedFiles(userId);
     if (batch.length === 0) {
       console.log(`[sync:${userId}] 0 uninitialized files remaining.`);
@@ -260,7 +273,7 @@ async function runSync(
     }
 
     for (const file of batch) {
-      if (state.shouldAbort) break;
+      if (state.shouldAbort || driveTokenExpired) break;
       if (uploaded >= MAX_PER_SYNC) {
         limitReached = true;
         break;
@@ -299,7 +312,23 @@ async function runSync(
 
         state.currentFile = file.name;
         await markFileInProgress(file.id, userId);
-        const fileBuffer = await downloadDriveFile(driveAuth, file.id);
+        let fileBuffer: Buffer;
+        try {
+          fileBuffer = await downloadDriveFile(driveAuth, file.id);
+        } catch (downloadErr: any) {
+          if (isDriveAuthError(downloadErr)) {
+            // Not this file's fault — leave it in_progress (resetStuckFiles
+            // reclaims it as uninitialized on the next run, no retry spent)
+            // and stop the whole run rather than failing every file left in
+            // the queue one at a time on a token that is never coming back.
+            console.log(
+              `[sync:${userId}]   Drive token expired — halting run instead of failing the rest of the queue.`,
+            );
+            driveTokenExpired = true;
+            break;
+          }
+          throw downloadErr;
+        }
         const description = useAI
           ? await withRetry(() =>
               generatePhotoDescription(fileBuffer, file.mime_type),
@@ -341,7 +370,13 @@ async function runSync(
   finishRun(
     userId,
     runId,
-    state.shouldAbort ? "aborted" : limitReached ? "limit_reached" : "done",
+    state.shouldAbort
+      ? "aborted"
+      : driveTokenExpired
+        ? "token_expired"
+        : limitReached
+          ? "limit_reached"
+          : "done",
     discovered,
     uploaded,
     skipped,

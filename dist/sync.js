@@ -15,6 +15,16 @@ const gemini_1 = require("./gemini");
 const photos_1 = require("./photos");
 const db_1 = require("./db");
 const SYNC_TIMEOUT_SECS = 3 * 60 * 60; // 3 hours — mirrors routes.ts's stale-run check
+// The Drive-side driveAuth client is built once per run from a token that
+// can't be refreshed mid-flight (see createClientFromToken in auth.ts). Once
+// it expires, every remaining drive.files.get call fails the same way — so
+// treat the first one as a signal to stop the whole run rather than burning
+// through the rest of the queue as one-by-one permanent failures.
+function isDriveAuthError(err) {
+    const status = err?.code ?? err?.response?.status;
+    const reason = err?.response?.data?.error?.errors?.[0]?.reason;
+    return status === 401 || reason === "authError";
+}
 // Per-user sync state — keyed by userId so concurrent users don't interfere
 const userSyncState = new Map();
 function getSyncState(userId) {
@@ -182,14 +192,15 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
     pushSnapshot(userId);
     console.log(`[sync:${userId}] Phase 2: Preparing to upload photos.`);
     let uploaded = 0, skipped = 0, failed = 0;
-    while (!state.shouldAbort && !limitReached) {
+    let driveTokenExpired = false;
+    while (!state.shouldAbort && !limitReached && !driveTokenExpired) {
         const batch = await (0, db_1.getUninitializedFiles)(userId);
         if (batch.length === 0) {
             console.log(`[sync:${userId}] 0 uninitialized files remaining.`);
             break;
         }
         for (const file of batch) {
-            if (state.shouldAbort)
+            if (state.shouldAbort || driveTokenExpired)
                 break;
             if (uploaded >= MAX_PER_SYNC) {
                 limitReached = true;
@@ -213,7 +224,22 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
                 }
                 state.currentFile = file.name;
                 await (0, db_1.markFileInProgress)(file.id, userId);
-                const fileBuffer = await (0, drive_1.downloadDriveFile)(driveAuth, file.id);
+                let fileBuffer;
+                try {
+                    fileBuffer = await (0, drive_1.downloadDriveFile)(driveAuth, file.id);
+                }
+                catch (downloadErr) {
+                    if (isDriveAuthError(downloadErr)) {
+                        // Not this file's fault — leave it in_progress (resetStuckFiles
+                        // reclaims it as uninitialized on the next run, no retry spent)
+                        // and stop the whole run rather than failing every file left in
+                        // the queue one at a time on a token that is never coming back.
+                        console.log(`[sync:${userId}]   Drive token expired — halting run instead of failing the rest of the queue.`);
+                        driveTokenExpired = true;
+                        break;
+                    }
+                    throw downloadErr;
+                }
                 const description = useAI
                     ? await (0, retry_1.withRetry)(() => (0, gemini_1.generatePhotoDescription)(fileBuffer, file.mime_type)).catch(() => undefined)
                     : undefined;
@@ -241,7 +267,13 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
         }
     }
     state.currentFile = null;
-    finishRun(userId, runId, state.shouldAbort ? "aborted" : limitReached ? "limit_reached" : "done", discovered, uploaded, skipped, failed);
+    finishRun(userId, runId, state.shouldAbort
+        ? "aborted"
+        : driveTokenExpired
+            ? "token_expired"
+            : limitReached
+                ? "limit_reached"
+                : "done", discovered, uploaded, skipped, failed);
     console.log(`[sync:${userId}] Finished. uploaded=${uploaded} skipped=${skipped} failed=${failed}`);
 }
 function finishRun(userId, runId, status, total, uploaded, skipped, failed) {

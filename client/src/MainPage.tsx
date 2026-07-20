@@ -8,7 +8,8 @@ interface SyncStatus {
     | "done"
     | "failed"
     | "aborted"
-    | "limit_reached";
+    | "limit_reached"
+    | "token_expired";
   currentFile: string | null;
   runId: number | null;
   latestRun: {
@@ -46,6 +47,7 @@ const STATUS_LABEL: Record<string, string> = {
   failed: "❌ Failed",
   aborted: "🛑 Aborted",
   limit_reached: "⚠️ Upload limit reached",
+  token_expired: "🔑 Drive session expired — click Resume to continue",
 };
 
 const IS_RUNNING = (status: string) =>

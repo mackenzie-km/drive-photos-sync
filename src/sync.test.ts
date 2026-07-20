@@ -523,6 +523,73 @@ describe("startSync — upload error paths", () => {
   });
 });
 
+describe("startSync — Drive token expiry mid-run", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockListDrivePhotos.mockImplementation(async function* () {});
+  });
+
+  it("halts the run instead of failing every remaining file when downloadDriveFile throws a 401", async () => {
+    const remainingFile = { ...FILE, id: "file-2", name: "photo2.jpg" };
+    mockGetUninitializedFiles
+      .mockResolvedValueOnce([FILE, remainingFile])
+      .mockResolvedValue([]);
+
+    const authError = Object.assign(new Error("Invalid Credentials"), {
+      code: 401,
+      response: {
+        status: 401,
+        data: { error: { errors: [{ reason: "authError" }] } },
+      },
+    });
+    mockDownloadDriveFile.mockRejectedValueOnce(authError);
+
+    await startSync("user-token-expired", false, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    // Neither file was marked failed — the run stopped before the second
+    // file was attempted, and the first is left for resetStuckFiles to
+    // reclaim rather than burning a retry on it.
+    expect(mockUpdateFileStatus).not.toHaveBeenCalled();
+    expect(mockUpdateSyncRun).toHaveBeenCalledWith(
+      "token_expired",
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      "user-token-expired",
+    );
+  });
+
+  it("also recognizes the reason field alone (no HTTP status) as an auth error", async () => {
+    mockGetUninitializedFiles
+      .mockResolvedValueOnce([FILE])
+      .mockResolvedValue([]);
+
+    const authError = Object.assign(new Error("Invalid Credentials"), {
+      response: { data: { error: { errors: [{ reason: "authError" }] } } },
+    });
+    mockDownloadDriveFile.mockRejectedValueOnce(authError);
+
+    await startSync("user-token-expired-2", false, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockUpdateFileStatus).not.toHaveBeenCalled();
+    expect(mockUpdateSyncRun).toHaveBeenCalledWith(
+      "token_expired",
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      "user-token-expired-2",
+    );
+  });
+});
+
 describe("startSync — limit_reached", () => {
   // These tests drive 10 001 mock iterations (useAI=true → MAX_PER_SYNC=10 000).
   // Mocks resolve synchronously so this completes in well under 1 s in practice,
