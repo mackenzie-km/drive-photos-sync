@@ -8,6 +8,11 @@ const pool = new Pool({
   idleTimeoutMillis: 30000,
 });
 
+// Required — an unhandled "error" from an idle client would otherwise crash the process.
+pool.on("error", (err) => {
+  console.error("[db] idle client error:", err);
+});
+
 export { pool };
 
 export const query = (text: string, params?: any[]) => pool.query(text, params);

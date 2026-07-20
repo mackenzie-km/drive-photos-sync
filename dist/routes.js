@@ -5,6 +5,12 @@ const auth_1 = require("./auth");
 const sync_1 = require("./sync");
 const db_1 = require("./db");
 const router = (0, express_1.Router)();
+// Express 4 doesn't catch rejections from async handlers — this forwards them to next(err) instead.
+function asyncHandler(fn) {
+    return (req, res, next) => {
+        fn(req, res, next).catch(next);
+    };
+}
 // ── Health ────────────────────────────────────────────────────────────────────
 router.get("/health", (_req, res) => {
     res.json({ ok: true });
@@ -86,7 +92,7 @@ router.post("/sync/abort", requireAuth, (req, res) => {
         message: "Abort signal sent — current file will finish then sync will stop",
     });
 });
-router.post("/sync/pending/clear", requireAuth, async (req, res) => {
+router.post("/sync/pending/clear", requireAuth, asyncHandler(async (req, res) => {
     const userId = req.userId;
     const { status } = (0, sync_1.getSyncState)(userId);
     if (status === "discovering" || status === "uploading") {
@@ -98,11 +104,11 @@ router.post("/sync/pending/clear", requireAuth, async (req, res) => {
     await (0, db_1.clearPendingFiles)(userId);
     await (0, sync_1.pushSnapshot)(userId);
     res.json({ message: "Pending files cleared" });
-});
-router.get("/sync/status", requireAuth, async (req, res) => {
+}));
+router.get("/sync/status", requireAuth, asyncHandler(async (req, res) => {
     const userId = req.userId;
     res.json(await (0, sync_1.getSyncSnapshot)(userId));
-});
+}));
 // SSE stream — replaces polling /sync/status every 2s. Sends a full snapshot
 // immediately on connect (including reconnects), then incremental pushes as
 // runSync progresses. Same-origin in both dev (Vite proxy) and prod (Vercel
@@ -117,18 +123,18 @@ router.get("/sync/events", requireAuth, (req, res) => {
     });
     res.flushHeaders();
     (0, sync_1.addSyncClient)(userId, res);
-    (0, sync_1.pushSnapshot)(userId, [res]);
+    (0, sync_1.pushSnapshot)(userId, [res]).catch((err) => console.error("[sse] failed to push initial snapshot:", err));
     const heartbeat = setInterval(() => res.write(":\n\n"), 15000);
     req.on("close", () => {
         clearInterval(heartbeat);
         (0, sync_1.removeSyncClient)(userId, res);
     });
 });
-router.get("/sync/files", requireAuth, async (req, res) => {
+router.get("/sync/files", requireAuth, asyncHandler(async (req, res) => {
     const files = await (0, db_1.getUploadedFiles)(req.userId);
     res.json({ files });
-});
-router.get("/picker/config", requireAuth, async (req, res) => {
+}));
+router.get("/picker/config", requireAuth, asyncHandler(async (req, res) => {
     const userId = req.userId;
     const auth = await (0, auth_1.getAuthClient)(userId);
     const { credentials } = await auth.refreshAccessToken();
@@ -142,5 +148,5 @@ router.get("/picker/config", requireAuth, async (req, res) => {
         client_id: process.env.GOOGLE_CLIENT_ID,
         api_key: process.env.GOOGLE_API_KEY,
     });
-});
+}));
 exports.default = router;

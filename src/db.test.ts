@@ -2,7 +2,7 @@ const mockQuery = jest.fn().mockResolvedValue({ rows: [] });
 
 // We mock `pg` itself rather than `./db` because resetStuckFiles holds a closure over `query`
 jest.mock("pg", () => ({
-  Pool: jest.fn().mockImplementation(() => ({ query: mockQuery })),
+  Pool: jest.fn().mockImplementation(() => ({ query: mockQuery, on: jest.fn() })),
 }));
 
 import {

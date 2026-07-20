@@ -4,6 +4,7 @@ jest.mock("./auth", () => ({
     .fn()
     .mockReturnValue("https://accounts.google.com/fake-auth"),
   handleCallback: jest.fn(),
+  getAuthClient: jest.fn(),
 }));
 
 jest.mock("./sync", () => ({
@@ -26,7 +27,7 @@ import express from "express";
 import session from "express-session";
 import request from "supertest";
 import routes from "./routes";
-import { handleCallback } from "./auth";
+import { handleCallback, getAuthClient } from "./auth";
 import {
   startSync,
   requestAbort,
@@ -34,15 +35,26 @@ import {
   getSyncState,
   pushSnapshot,
 } from "./sync";
-import { clearPendingFiles, getResumableCount } from "./db";
+import { clearPendingFiles, getResumableCount, getUploadedFiles } from "./db";
 
 const mockHandleCallback = handleCallback as jest.Mock;
+const mockGetAuthClient = getAuthClient as jest.Mock;
 const mockStartSync = startSync as jest.Mock;
 const mockGetSyncSnapshot = getSyncSnapshot as jest.Mock;
 const mockGetSyncState = getSyncState as jest.Mock;
 const mockPushSnapshot = pushSnapshot as jest.Mock;
 const mockClearPendingFiles = clearPendingFiles as jest.Mock;
 const mockGetResumableCount = getResumableCount as jest.Mock;
+const mockGetUploadedFiles = getUploadedFiles as jest.Mock;
+
+// Polls until condition is true.
+async function waitFor(condition: () => boolean, timeoutMs = 2000) {
+  const start = Date.now();
+  while (!condition()) {
+    if (Date.now() - start > timeoutMs) throw new Error("waitFor timed out");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 
 // Creates a minimal Express app with session middleware.
 // Pass a userId to simulate an already-authenticated session.
@@ -57,6 +69,16 @@ function createApp(userId?: string) {
     });
   }
   app.use(routes);
+  app.use(
+    (
+      err: any,
+      req: express.Request,
+      res: express.Response,
+      _next: express.NextFunction,
+    ) => {
+      res.status(500).json({ error: "Internal server error" });
+    },
+  );
   return app;
 }
 
@@ -105,7 +127,11 @@ describe("POST /sync/pending/clear", () => {
   beforeEach(() => jest.clearAllMocks());
 
   it("clears pending files and pushes a fresh snapshot when idle", async () => {
-    mockGetSyncState.mockReturnValue({ status: "idle", runId: null, currentFile: null });
+    mockGetSyncState.mockReturnValue({
+      status: "idle",
+      runId: null,
+      currentFile: null,
+    });
     const res = await request(createApp("user-123")).post(
       "/sync/pending/clear",
     );
@@ -115,12 +141,32 @@ describe("POST /sync/pending/clear", () => {
   });
 
   it("rejects with 400 while a sync is running, without clearing anything", async () => {
-    mockGetSyncState.mockReturnValue({ status: "uploading", runId: 1, currentFile: "photo.jpg" });
+    mockGetSyncState.mockReturnValue({
+      status: "uploading",
+      runId: 1,
+      currentFile: "photo.jpg",
+    });
     const res = await request(createApp("user-123")).post(
       "/sync/pending/clear",
     );
     expect(res.status).toBe(400);
     expect(mockClearPendingFiles).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 instead of crashing when clearPendingFiles rejects (e.g. a dropped DB connection)", async () => {
+    mockGetSyncState.mockReturnValue({
+      status: "idle",
+      runId: null,
+      currentFile: null,
+    });
+    mockClearPendingFiles.mockRejectedValue(
+      new Error("Connection terminated unexpectedly"),
+    );
+    const res = await request(createApp("user-123")).post(
+      "/sync/pending/clear",
+    );
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe("Internal server error");
   });
 });
 
@@ -144,6 +190,80 @@ describe("GET /sync/status", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual(snapshot);
     expect(mockGetSyncSnapshot).toHaveBeenCalledWith("user-123");
+  });
+
+  it("returns 500 instead of crashing when getSyncSnapshot rejects (e.g. a dropped DB connection)", async () => {
+    mockGetSyncSnapshot.mockRejectedValue(
+      new Error("Connection terminated unexpectedly"),
+    );
+    const res = await request(createApp("user-123")).get("/sync/status");
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe("Internal server error");
+  });
+});
+
+describe("GET /sync/files", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("returns whatever getUploadedFiles resolves for the authenticated user", async () => {
+    mockGetUploadedFiles.mockResolvedValue([{ id: "1", name: "photo.jpg" }]);
+    const res = await request(createApp("user-123")).get("/sync/files");
+    expect(res.status).toBe(200);
+    expect(res.body.files).toEqual([{ id: "1", name: "photo.jpg" }]);
+    expect(mockGetUploadedFiles).toHaveBeenCalledWith("user-123");
+  });
+
+  it("returns 500 instead of crashing when getUploadedFiles rejects", async () => {
+    mockGetUploadedFiles.mockRejectedValue(
+      new Error("Connection terminated unexpectedly"),
+    );
+    const res = await request(createApp("user-123")).get("/sync/files");
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe("Internal server error");
+  });
+});
+
+describe("GET /picker/config", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("returns 500 instead of crashing when getAuthClient rejects", async () => {
+    mockGetAuthClient.mockRejectedValue(
+      new Error("Connection terminated unexpectedly"),
+    );
+    const res = await request(createApp("user-123")).get("/picker/config");
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe("Internal server error");
+  });
+});
+
+describe("GET /sync/events — resilience", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("does not crash the process when the initial pushSnapshot rejects", async () => {
+    mockPushSnapshot.mockRejectedValue(
+      new Error("Connection terminated unexpectedly"),
+    );
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    const server = createApp("user-123").listen(0);
+    const port = (server.address() as any).port;
+    const controller = new AbortController();
+
+    try {
+      const res = await fetch(`http://localhost:${port}/sync/events`, {
+        signal: controller.signal,
+      });
+      expect(res.status).toBe(200);
+
+      await waitFor(() => errorSpy.mock.calls.length > 0);
+      expect(errorSpy.mock.calls[0][0]).toContain(
+        "failed to push initial snapshot",
+      );
+    } finally {
+      controller.abort();
+      errorSpy.mockRestore();
+      await new Promise((resolve) => server.close(() => resolve(undefined)));
+    }
   });
 });
 

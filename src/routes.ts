@@ -1,4 +1,4 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import { getAuthUrl, handleCallback, getAuthClient } from "./auth";
 import {
   startSync,
@@ -12,6 +12,15 @@ import {
 import { getUploadedFiles, clearPendingFiles, getResumableCount } from "./db";
 
 const router = Router();
+
+// Express 4 doesn't catch rejections from async handlers — this forwards them to next(err) instead.
+function asyncHandler(
+  fn: (req: Request, res: Response, next: NextFunction) => Promise<void>,
+) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    fn(req, res, next).catch(next);
+  };
+}
 
 // ── Health ────────────────────────────────────────────────────────────────────
 
@@ -104,7 +113,7 @@ router.post("/sync/abort", requireAuth, (req: Request, res: Response) => {
 router.post(
   "/sync/pending/clear",
   requireAuth,
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const userId = (req as any).userId;
     const { status } = getSyncState(userId);
     if (status === "discovering" || status === "uploading") {
@@ -116,13 +125,17 @@ router.post(
     await clearPendingFiles(userId);
     await pushSnapshot(userId);
     res.json({ message: "Pending files cleared" });
-  },
+  }),
 );
 
-router.get("/sync/status", requireAuth, async (req: Request, res: Response) => {
-  const userId = (req as any).userId;
-  res.json(await getSyncSnapshot(userId));
-});
+router.get(
+  "/sync/status",
+  requireAuth,
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    res.json(await getSyncSnapshot(userId));
+  }),
+);
 
 // SSE stream — replaces polling /sync/status every 2s. Sends a full snapshot
 // immediately on connect (including reconnects), then incremental pushes as
@@ -140,7 +153,9 @@ router.get("/sync/events", requireAuth, (req: Request, res: Response) => {
   res.flushHeaders();
 
   addSyncClient(userId, res);
-  pushSnapshot(userId, [res]);
+  pushSnapshot(userId, [res]).catch((err) =>
+    console.error("[sse] failed to push initial snapshot:", err),
+  );
 
   const heartbeat = setInterval(() => res.write(":\n\n"), 15000);
   req.on("close", () => {
@@ -149,15 +164,19 @@ router.get("/sync/events", requireAuth, (req: Request, res: Response) => {
   });
 });
 
-router.get("/sync/files", requireAuth, async (req: Request, res: Response) => {
-  const files = await getUploadedFiles((req as any).userId);
-  res.json({ files });
-});
+router.get(
+  "/sync/files",
+  requireAuth,
+  asyncHandler(async (req: Request, res: Response) => {
+    const files = await getUploadedFiles((req as any).userId);
+    res.json({ files });
+  }),
+);
 
 router.get(
   "/picker/config",
   requireAuth,
-  async (req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
     const userId = (req as any).userId;
     const auth = await getAuthClient(userId);
     const { credentials } = await auth.refreshAccessToken();
@@ -171,7 +190,7 @@ router.get(
       client_id: process.env.GOOGLE_CLIENT_ID,
       api_key: process.env.GOOGLE_API_KEY,
     });
-  },
+  }),
 );
 
 export default router;

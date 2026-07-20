@@ -27,6 +27,10 @@ const pool = new pg_1.Pool({
     idleTimeoutMillis: 30000,
 });
 exports.pool = pool;
+// Required — an unhandled "error" from an idle client would otherwise crash the process.
+pool.on("error", (err) => {
+    console.error("[db] idle client error:", err);
+});
 const query = (text, params) => pool.query(text, params);
 exports.query = query;
 // Called once at startup before the server begins accepting requests.
