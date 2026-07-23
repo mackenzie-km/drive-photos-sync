@@ -53,10 +53,9 @@ async function getCountsPayload(userId) {
         resumableCount,
     };
 }
-// Full snapshot — same shape /sync/status has always returned, including the
-// crash-recovery correction (no in-memory state, or a run stuck past the
-// timeout, gets reported as failed). Used for the one-shot REST endpoint and
-// for the first message sent on every new/reconnected SSE connection.
+// Full snapshot, including the crash-recovery correction (no in-memory
+// state, or a run stuck past the timeout, gets reported as failed). Used for
+// the first message sent on every new/reconnected SSE connection.
 async function getSyncSnapshot(userId) {
     const state = getSyncState(userId);
     const latestRun = await (0, db_1.getLatestSyncRun)(userId);
@@ -142,7 +141,7 @@ async function startSync(userId, useAI, folderId, driveAccessToken) {
         throw err;
     }
     userSyncState.get(userId).runId = runId;
-    // Fire and forget — progress is tracked in the DB and queryable via /sync/status
+    // Fire and forget — progress is tracked in the DB and pushed live via SSE
     runSync(userId, runId, useAI, folderId, driveAccessToken).catch((err) => {
         console.error("[sync] fatal error:", err.message);
         finishRun(userId, runId, "failed", 0, 0, 0, 0);

@@ -3,7 +3,6 @@ import { getAuthUrl, handleCallback, getAuthClient } from "./auth";
 import {
   startSync,
   requestAbort,
-  getSyncSnapshot,
   getSyncState,
   addSyncClient,
   removeSyncClient,
@@ -128,16 +127,7 @@ router.post(
   }),
 );
 
-router.get(
-  "/sync/status",
-  requireAuth,
-  asyncHandler(async (req: Request, res: Response) => {
-    const userId = (req as any).userId;
-    res.json(await getSyncSnapshot(userId));
-  }),
-);
-
-// SSE stream — replaces polling /sync/status every 2s. Sends a full snapshot
+// SSE stream — replaces the old REST-polling approach. Sends a full snapshot
 // immediately on connect (including reconnects), then incremental pushes as
 // runSync progresses. Same-origin in both dev (Vite proxy) and prod (Vercel
 // rewrite), so no CORS/withCredentials changes are needed for EventSource.

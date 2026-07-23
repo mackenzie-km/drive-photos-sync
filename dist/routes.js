@@ -105,11 +105,7 @@ router.post("/sync/pending/clear", requireAuth, asyncHandler(async (req, res) =>
     await (0, sync_1.pushSnapshot)(userId);
     res.json({ message: "Pending files cleared" });
 }));
-router.get("/sync/status", requireAuth, asyncHandler(async (req, res) => {
-    const userId = req.userId;
-    res.json(await (0, sync_1.getSyncSnapshot)(userId));
-}));
-// SSE stream — replaces polling /sync/status every 2s. Sends a full snapshot
+// SSE stream — replaces the old REST-polling approach. Sends a full snapshot
 // immediately on connect (including reconnects), then incremental pushes as
 // runSync progresses. Same-origin in both dev (Vite proxy) and prod (Vercel
 // rewrite), so no CORS/withCredentials changes are needed for EventSource.

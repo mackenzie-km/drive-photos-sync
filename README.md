@@ -114,7 +114,6 @@ npm run dev
 | Method | Route          | Description                                                                                                                                                                                                                                                                                                                |
 | ------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET`  | `/sync/events` | Opens a Server-Sent Events stream. Sends a full snapshot immediately on connect (and on every reconnect), then pushes live updates as discovery/upload progresses. This is what the frontend uses in place of polling.                                                                                                    |
-| `GET`  | `/sync/status` | One-shot snapshot of sync progress (status, current file, file counts). Superseded by `/sync/events` for the live UI; still useful for scripts or a manual check.                                                                                                                                                          |
 | `GET`  | `/sync/files`  | Returns list of already uploaded files                                                                                                                                                                                                                                                                                     |
 | `POST` | `/sync/start`  | Kicks off the sync process. Requires `folderId` (from the Picker) and accepts `useAI` (default `true`). Discovers photos in the selected folder, saves records to DB, optionally sends photos to Gemini for descriptions, then uploads to Google Photos one at a time. Capped at 10,000 files per sync with AI, 20,000 without. |
 | `POST` | `/sync/abort`  | Gracefully stops sync: immediately clears local memory and sets a flag so the loop stops after the current file finishes                                                                                                                                                                                                   |
@@ -169,7 +168,7 @@ npm run dev
 | `started_at`   | `BIGINT`  | Unix timestamp                                                  |
 | `completed_at` | `BIGINT`  | Unix timestamp; nullable                                        |
 
-> **Note:** `sync_runs`'s `total`/`uploaded`/`skipped`/`failed` are counts for *that one run* only. They're unrelated to the `fileCounts` object returned by `/sync/status` and `/sync/events`, which is always a fresh, live query of `drive_files` and represents all-time totals across every folder and run for that user — the two are not meant to match.
+> **Note:** `sync_runs`'s `total`/`uploaded`/`skipped`/`failed` are counts for *that one run* only. They're unrelated to the `fileCounts` object returned by `/sync/events`, which is always a fresh, live query of `drive_files` and represents all-time totals across every folder and run for that user — the two are not meant to match.
 
 ## Sync lifecycle
 

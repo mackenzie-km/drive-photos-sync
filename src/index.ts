@@ -69,10 +69,7 @@ initDb()
         `Step 1: GET  http://localhost:${PORT}/auth/url  → open that URL in your browser`,
       );
       console.log(
-        `Step 2: POST http://localhost:${PORT}/sync/start → start the sync`,
-      );
-      console.log(
-        `        GET  http://localhost:${PORT}/sync/status → check progress\n`,
+        `Step 2: POST http://localhost:${PORT}/sync/start → start the sync\n`,
       );
     });
   })
