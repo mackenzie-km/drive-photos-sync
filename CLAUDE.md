@@ -29,7 +29,7 @@ The pre-commit hook also best-effort auto-logs one line to `DECISIONS.md` per co
 ## Architecture
 
 - **Backend**: Node/Express (`src/`) — OAuth, Drive discovery, Gemini, Photos upload
-- **Frontend**: React/Vite (`client/`) — single page, subscribes to `/sync/events` (SSE) for live progress instead of polling; `/sync/status` remains as a one-shot snapshot endpoint
+- **Frontend**: React/Vite (`client/`) — single page, subscribes to `/sync/events` (SSE) for live progress instead of polling
 - **Database**: Postgres — tokens, file sync state, session data (`connect-pg-simple`)
 - **Deployment**: Render (backend) + Vercel (frontend)
 
@@ -57,7 +57,7 @@ Phase 1 is conditionally skipped, and the signal for that is **`folderId === nul
 
 ### Real-time progress via SSE, not polling
 
-`GET /sync/events` (`routes.ts`) opens a Server-Sent Events stream. Connections are tracked in `sync.ts` via an in-memory `Map<userId, Set<Response>>` (`userSyncClients`) — single-process only; a sync running on one Node instance won't push to a browser connected to another instance if this is ever scaled horizontally. `/sync/status` still exists as a one-shot REST snapshot (used by scripts, or a manual check) but the frontend no longer polls it.
+`GET /sync/events` (`routes.ts`) opens a Server-Sent Events stream. Connections are tracked in `sync.ts` via an in-memory `Map<userId, Set<Response>>` (`userSyncClients`) — single-process only; a sync running on one Node instance won't push to a browser connected to another instance if this is ever scaled horizontally. The one-shot `GET /sync/status` REST endpoint that predated SSE has been removed — nothing in the repo (frontend, scripts, or CI) called it, so it was dead weight kept alive only by its own doc/test/banner references. `getSyncSnapshot` is now used exclusively for the first message on a new/reconnected SSE connection.
 
 Two push functions exist, both DB-backed:
 
@@ -94,7 +94,7 @@ Gemini requires the full file buffer (`inlineData`). Files are downloaded entire
 
 ### Sync state is in-memory
 
-`userSyncState` (a Map in `sync.ts`) tracks per-user sync progress. It is lost on server restart. `getSyncSnapshot` (used by both `/sync/status` and the first SSE message on connect) detects a `running` DB row with no matching in-memory state and marks it `failed`, prompting the user to re-run. `userSyncClients` (the SSE connection registry) is likewise in-memory and lost on restart, but this is self-healing: `EventSource` auto-reconnects on its own, and every new connection gets a fresh `getSyncSnapshot` immediately.
+`userSyncState` (a Map in `sync.ts`) tracks per-user sync progress. It is lost on server restart. `getSyncSnapshot` (used for the first SSE message on connect) detects a `running` DB row with no matching in-memory state and marks it `failed`, prompting the user to re-run. `userSyncClients` (the SSE connection registry) is likewise in-memory and lost on restart, but this is self-healing: `EventSource` auto-reconnects on its own, and every new connection gets a fresh `getSyncSnapshot` immediately.
 
 ### md5 deduplication
 

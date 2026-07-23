@@ -58,8 +58,7 @@ const PORT = process.env.PORT ?? 3000;
     app.listen(PORT, () => {
         console.log(`\nServer running at http://localhost:${PORT}`);
         console.log(`Step 1: GET  http://localhost:${PORT}/auth/url  → open that URL in your browser`);
-        console.log(`Step 2: POST http://localhost:${PORT}/sync/start → start the sync`);
-        console.log(`        GET  http://localhost:${PORT}/sync/status → check progress\n`);
+        console.log(`Step 2: POST http://localhost:${PORT}/sync/start → start the sync\n`);
     });
 })
     .catch((err) => {

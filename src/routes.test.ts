@@ -10,7 +10,6 @@ jest.mock("./auth", () => ({
 jest.mock("./sync", () => ({
   startSync: jest.fn(),
   requestAbort: jest.fn(),
-  getSyncSnapshot: jest.fn(),
   getSyncState: jest.fn(),
   addSyncClient: jest.fn(),
   removeSyncClient: jest.fn(),
@@ -28,19 +27,12 @@ import session from "express-session";
 import request from "supertest";
 import routes from "./routes";
 import { handleCallback, getAuthClient } from "./auth";
-import {
-  startSync,
-  requestAbort,
-  getSyncSnapshot,
-  getSyncState,
-  pushSnapshot,
-} from "./sync";
+import { startSync, requestAbort, getSyncState, pushSnapshot } from "./sync";
 import { clearPendingFiles, getResumableCount, getUploadedFiles } from "./db";
 
 const mockHandleCallback = handleCallback as jest.Mock;
 const mockGetAuthClient = getAuthClient as jest.Mock;
 const mockStartSync = startSync as jest.Mock;
-const mockGetSyncSnapshot = getSyncSnapshot as jest.Mock;
 const mockGetSyncState = getSyncState as jest.Mock;
 const mockPushSnapshot = pushSnapshot as jest.Mock;
 const mockClearPendingFiles = clearPendingFiles as jest.Mock;
@@ -165,38 +157,6 @@ describe("POST /sync/pending/clear", () => {
     const res = await request(createApp("user-123")).post(
       "/sync/pending/clear",
     );
-    expect(res.status).toBe(500);
-    expect(res.body.error).toBe("Internal server error");
-  });
-});
-
-// The stale-run correction logic itself now lives in sync.ts's
-// getSyncSnapshot (tested directly in sync.test.ts). This just confirms the
-// route is a thin pass-through.
-describe("GET /sync/status", () => {
-  beforeEach(() => jest.clearAllMocks());
-
-  it("returns whatever getSyncSnapshot resolves for the authenticated user", async () => {
-    const snapshot = {
-      status: "idle",
-      currentFile: null,
-      runId: null,
-      latestRun: { status: "failed", error: "Sync was interrupted." },
-      fileCounts: {},
-    };
-    mockGetSyncSnapshot.mockResolvedValue(snapshot);
-
-    const res = await request(createApp("user-123")).get("/sync/status");
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual(snapshot);
-    expect(mockGetSyncSnapshot).toHaveBeenCalledWith("user-123");
-  });
-
-  it("returns 500 instead of crashing when getSyncSnapshot rejects (e.g. a dropped DB connection)", async () => {
-    mockGetSyncSnapshot.mockRejectedValue(
-      new Error("Connection terminated unexpectedly"),
-    );
-    const res = await request(createApp("user-123")).get("/sync/status");
     expect(res.status).toBe(500);
     expect(res.body.error).toBe("Internal server error");
   });
