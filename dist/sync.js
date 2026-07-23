@@ -145,7 +145,7 @@ async function startSync(userId, useAI, folderId, driveAccessToken) {
     // Fire and forget — progress is tracked in the DB and queryable via /sync/status
     runSync(userId, runId, useAI, folderId, driveAccessToken).catch((err) => {
         console.error("[sync] fatal error:", err.message);
-        finishRun(userId, runId, "failed", 0, 0, 0, 0);
+        finishRun(userId, runId, "failed");
     });
     return runId;
 }
@@ -184,7 +184,7 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
         }
         console.log(`[sync:${userId}] Discovery complete: ${discovered} photos found.`);
         if (state.shouldAbort) {
-            return finishRun(userId, runId, "aborted", discovered, 0, 0, 0);
+            return finishRun(userId, runId, "aborted");
         }
     }
     // ── Phase 2: upload ────────────────────────────────────────────────────────
@@ -273,10 +273,10 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
             ? "token_expired"
             : limitReached
                 ? "limit_reached"
-                : "done", discovered, uploaded, skipped, failed);
+                : "done");
     console.log(`[sync:${userId}] Finished. uploaded=${uploaded} skipped=${skipped} failed=${failed}`);
 }
-function finishRun(userId, runId, status, total, uploaded, skipped, failed) {
+function finishRun(userId, runId, status) {
     const state = userSyncState.get(userId);
     if (state && state.runId === runId)
         state.status = status;
@@ -296,5 +296,5 @@ function finishRun(userId, runId, status, total, uploaded, skipped, failed) {
         })
             .catch((err) => console.error("[sync] failed to push terminal update:", err));
     }
-    (0, db_1.updateSyncRun)(status, total, uploaded, skipped, failed, Math.floor(Date.now() / 1000), runId, userId).catch((err) => console.error("[sync] failed to update sync run:", err));
+    (0, db_1.updateSyncRun)(status, runId, userId).catch((err) => console.error("[sync] failed to update sync run:", err));
 }

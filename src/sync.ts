@@ -186,7 +186,7 @@ export async function startSync(
   // Fire and forget — progress is tracked in the DB and queryable via /sync/status
   runSync(userId, runId, useAI, folderId, driveAccessToken).catch((err) => {
     console.error("[sync] fatal error:", err.message);
-    finishRun(userId, runId, "failed", 0, 0, 0, 0);
+    finishRun(userId, runId, "failed");
   });
 
   return runId;
@@ -252,7 +252,7 @@ async function runSync(
     );
 
     if (state.shouldAbort) {
-      return finishRun(userId, runId, "aborted", discovered, 0, 0, 0);
+      return finishRun(userId, runId, "aborted");
     }
   }
 
@@ -377,25 +377,13 @@ async function runSync(
         : limitReached
           ? "limit_reached"
           : "done",
-    discovered,
-    uploaded,
-    skipped,
-    failed,
   );
   console.log(
     `[sync:${userId}] Finished. uploaded=${uploaded} skipped=${skipped} failed=${failed}`,
   );
 }
 
-function finishRun(
-  userId: string,
-  runId: number,
-  status: SyncStatus,
-  total: number,
-  uploaded: number,
-  skipped: number,
-  failed: number,
-) {
+function finishRun(userId: string, runId: number, status: SyncStatus) {
   const state = userSyncState.get(userId);
   if (state && state.runId === runId) state.status = status;
 
@@ -417,14 +405,7 @@ function finishRun(
       );
   }
 
-  updateSyncRun(
-    status,
-    total,
-    uploaded,
-    skipped,
-    failed,
-    Math.floor(Date.now() / 1000),
-    runId,
-    userId,
-  ).catch((err) => console.error("[sync] failed to update sync run:", err));
+  updateSyncRun(status, runId, userId).catch((err) =>
+    console.error("[sync] failed to update sync run:", err),
+  );
 }

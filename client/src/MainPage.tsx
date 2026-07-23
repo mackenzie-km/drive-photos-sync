@@ -14,11 +14,6 @@ interface SyncStatus {
   runId: number | null;
   latestRun: {
     id: number;
-    uploaded: number;
-    failed: number;
-    total: number;
-    started_at: number;
-    finished_at: number | null;
     error?: string;
   } | null;
   fileCounts: {
@@ -159,7 +154,7 @@ export default function MainPage() {
             ? {
                 ...prev,
                 latestRun: prev.latestRun
-                  ? { ...prev.latestRun, error: undefined, failed: 0 }
+                  ? { ...prev.latestRun, error: undefined }
                   : null,
               }
             : null,

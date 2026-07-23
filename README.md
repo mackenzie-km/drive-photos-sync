@@ -157,19 +157,14 @@ npm run dev
 
 ### sync_runs
 
-| Column         | Type      | Notes                                                           |
-| -------------- | --------- | --------------------------------------------------------------- |
-| `id`           | `SERIAL`  | Primary key                                                     |
-| `user_id`      | `TEXT`    |                                                                 |
-| `status`       | `TEXT`    | `running` \| `done` \| `failed` \| `aborted` \| `limit_reached` |
-| `total`        | `INTEGER` |                                                                 |
-| `uploaded`     | `INTEGER` |                                                                 |
-| `skipped`      | `INTEGER` |                                                                 |
-| `failed`       | `INTEGER` |                                                                 |
-| `started_at`   | `BIGINT`  | Unix timestamp                                                  |
-| `completed_at` | `BIGINT`  | Unix timestamp; nullable                                        |
+| Column       | Type     | Notes                                                                        |
+| ------------ | -------- | ----------------------------------------------------------------------------- |
+| `id`         | `SERIAL` | Primary key                                                                  |
+| `user_id`    | `TEXT`   |                                                                               |
+| `status`     | `TEXT`   | `running` \| `done` \| `failed` \| `aborted` \| `limit_reached` \| `token_expired` |
+| `started_at` | `BIGINT` | Unix timestamp                                                               |
 
-> **Note:** `sync_runs`'s `total`/`uploaded`/`skipped`/`failed` are counts for *that one run* only. They're unrelated to the `fileCounts` object returned by `/sync/status` and `/sync/events`, which is always a fresh, live query of `drive_files` and represents all-time totals across every folder and run for that user — the two are not meant to match.
+> **Note:** `sync_runs` only tracks *whether* the last run is stuck/stale (used by `getSyncSnapshot`'s crash-recovery check) — it doesn't hold per-run counts. Progress and totals always come from a fresh, live query of `drive_files` (`fileCounts`, returned by `/sync/status` and `/sync/events`), which represents all-time totals across every folder and run for that user.
 
 ## Sync lifecycle
 

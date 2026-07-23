@@ -554,11 +554,6 @@ describe("startSync — Drive token expiry mid-run", () => {
     expect(mockUpdateSyncRun).toHaveBeenCalledWith(
       "token_expired",
       expect.any(Number),
-      expect.any(Number),
-      expect.any(Number),
-      expect.any(Number),
-      expect.any(Number),
-      expect.any(Number),
       "user-token-expired",
     );
   });
@@ -579,11 +574,6 @@ describe("startSync — Drive token expiry mid-run", () => {
     expect(mockUpdateFileStatus).not.toHaveBeenCalled();
     expect(mockUpdateSyncRun).toHaveBeenCalledWith(
       "token_expired",
-      expect.any(Number),
-      expect.any(Number),
-      expect.any(Number),
-      expect.any(Number),
-      expect.any(Number),
       expect.any(Number),
       "user-token-expired-2",
     );
@@ -622,11 +612,6 @@ describe("startSync — limit_reached", () => {
     expect(mockUpdateSyncRun).toHaveBeenCalledWith(
       "limit_reached",
       expect.any(Number),
-      expect.any(Number),
-      expect.any(Number),
-      expect.any(Number),
-      expect.any(Number),
-      expect.any(Number),
       "user-limit-disc",
     );
   });
@@ -653,11 +638,6 @@ describe("startSync — limit_reached", () => {
     expect(mockUpdateSyncRun).toHaveBeenCalledWith(
       "limit_reached",
       expect.any(Number),
-      expect.any(Number),
-      expect.any(Number),
-      expect.any(Number),
-      expect.any(Number),
-      expect.any(Number),
       "user-limit-upload",
     );
   });
@@ -673,8 +653,8 @@ describe("startSync — crash mid-sync (SSE terminal push)", () => {
     // Simulates an expired driveAccessToken partway through discovery:
     // listDrivePhotos throws after one file is found, rejecting runSync and
     // routing through startSync's fire-and-forget .catch(), which calls
-    // finishRun(userId, runId, "failed", 0, 0, 0, 0) — args with no relation
-    // to what was actually discovered.
+    // finishRun(userId, runId, "failed") — the SSE push must still reflect
+    // what was actually discovered, not zeroes derived from finishRun's args.
     mockListDrivePhotos.mockImplementation(async function* () {
       yield {
         id: "file-1",

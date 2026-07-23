@@ -53,17 +53,55 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_drive_files_folder ON drive_files(user_id, folder_id, status);
 
     CREATE TABLE IF NOT EXISTS sync_runs (
-      id           SERIAL PRIMARY KEY,
-      user_id      TEXT NOT NULL,
-      status       TEXT NOT NULL DEFAULT 'running',
-      total        INTEGER DEFAULT 0,
-      uploaded     INTEGER DEFAULT 0,
-      skipped      INTEGER DEFAULT 0,
-      failed       INTEGER DEFAULT 0,
-      started_at   BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT,
-      completed_at BIGINT
+      id         SERIAL PRIMARY KEY,
+      user_id    TEXT NOT NULL,
+      status     TEXT NOT NULL DEFAULT 'running',
+      started_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT
     );
   `);
+
+  await runMigrations();
+}
+
+// Schema changes beyond "create if missing" (dropping/renaming columns, backfills)
+// go here instead of being hand-rolled as one-off ALTER statements above — each
+// migration runs exactly once, tracked in schema_migrations. To add a new one,
+// append to this array; never edit or reorder past entries once they've shipped,
+// since `name` is what's checked against already-applied migrations.
+const migrations: { name: string; sql: string }[] = [
+  {
+    name: "0001_drop_sync_runs_unused_columns",
+    sql: `
+      ALTER TABLE sync_runs DROP COLUMN IF EXISTS total;
+      ALTER TABLE sync_runs DROP COLUMN IF EXISTS uploaded;
+      ALTER TABLE sync_runs DROP COLUMN IF EXISTS skipped;
+      ALTER TABLE sync_runs DROP COLUMN IF EXISTS failed;
+      ALTER TABLE sync_runs DROP COLUMN IF EXISTS completed_at;
+    `,
+  },
+];
+
+async function runMigrations() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      name       TEXT PRIMARY KEY,
+      applied_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT
+    );
+  `);
+
+  for (const migration of migrations) {
+    const { rows } = await query(
+      "SELECT 1 FROM schema_migrations WHERE name = $1",
+      [migration.name],
+    );
+    if (rows.length > 0) continue;
+
+    await query(migration.sql);
+    await query("INSERT INTO schema_migrations (name) VALUES ($1)", [
+      migration.name,
+    ]);
+    console.log(`[db] applied migration: ${migration.name}`);
+  }
 }
 
 export async function saveTokens(
@@ -222,19 +260,14 @@ export async function createSyncRun(userId: string): Promise<number> {
 
 export async function updateSyncRun(
   status: string,
-  total: number,
-  uploaded: number,
-  skipped: number,
-  failed: number,
-  completedAt: number,
   id: number,
   userId: string,
 ) {
   await query(
     `UPDATE sync_runs
-     SET status = $1, total = $2, uploaded = $3, skipped = $4, failed = $5, completed_at = $6
-     WHERE id = $7 AND user_id = $8`,
-    [status, total, uploaded, skipped, failed, completedAt, id, userId],
+     SET status = $1
+     WHERE id = $2 AND user_id = $3`,
+    [status, id, userId],
   );
 }
 
