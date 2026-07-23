@@ -11,7 +11,6 @@ interface SyncStatus {
     | "limit_reached"
     | "token_expired";
   currentFile: string | null;
-  runId: number | null;
   latestRun: {
     id: number;
     uploaded: number;
