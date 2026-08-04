@@ -4,6 +4,9 @@ One line per real design/behavior decision, grouped by branch. Trivial
 changes (wording, formatting, docs-only edits) are intentionally skipped —
 this is not a changelog of every commit.
 
+## prototype/png-exif-date-writer
+- Prototype upload now uses productUrl (a new prototype-local uploadPhotoWithUrl) instead of hand-constructing photos.google.com/photo/{id}, because the ID-based URL 404s—productUrl is the correct web-viewable link format returned by the Photos API's batchCreate response, which the real app's uploadPhoto discards.
+
 ## worktree-agent-aa03ccc8306912487
 - Removed the now-unused `/sync/status` REST endpoint (route, docs, and startup log message) since SSE fully replaced it and nothing still called it.
 

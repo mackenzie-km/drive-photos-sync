@@ -2,7 +2,7 @@ import "dotenv/config";
 import { readFileSync } from "fs";
 import { Readable } from "stream";
 import { getAuthClient } from "../src/auth";
-import { uploadPhoto } from "../src/photos";
+import { uploadPhotoWithUrl } from "./uploadWithProductUrl";
 import { writePngDate, readPngDate } from "./pngExif";
 
 const USER_ID = "102316373971929260712";
@@ -31,8 +31,8 @@ async function main() {
   console.log("EXIF date after write (independent re-parse):", after);
 
   console.log("\nUploading test copy to Google Photos...");
-  const filename = "PROTOTYPE-datefix-test-IMG_2324.png";
-  const mediaId = await uploadPhoto(
+  const filename = "PROTOTYPE-datefix-test-IMG_2324-v2.png";
+  const { mediaId, productUrl } = await uploadPhotoWithUrl(
     auth,
     Readable.from(rewritten),
     filename,
@@ -41,17 +41,7 @@ async function main() {
   );
 
   console.log(`\nUploaded. Media item ID: ${mediaId}`);
-  console.log(`View it at: https://photos.google.com/photo/${mediaId}`);
-
-  // Independent confirmation via the Photos API itself, not just our own parser.
-  const token = await auth.getAccessToken();
-  const res = await fetch(
-    `https://photoslibrary.googleapis.com/v1/mediaItems/${mediaId}`,
-    { headers: { Authorization: `Bearer ${token.token}` } },
-  );
-  const mediaItem = await res.json();
-  console.log("\nGoogle Photos' own reported creationTime for this upload:");
-  console.log(mediaItem.mediaMetadata?.creationTime);
+  console.log(`View it at (productUrl, the correct web-viewable link): ${productUrl}`);
 }
 
 main().catch((err) => {
