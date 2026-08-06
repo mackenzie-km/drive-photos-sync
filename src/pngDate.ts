@@ -136,18 +136,16 @@ function writePngDate(png: Buffer, date: Date): Buffer {
   return Buffer.concat(parts);
 }
 
-// Tags we're comfortable discarding when rewriting the eXIf chunk — all
-// auto-derived from the image itself (dimensions, colorspace, resolution),
-// nothing a person would notice missing. Anything else (Orientation, GPS,
-// Make/Model, ...) is treated as worth protecting.
-const SAFE_TO_DISCARD_EXIF_TAGS = new Set([
-  0x011a, // XResolution
-  0x011b, // YResolution
-  0x0128, // ResolutionUnit
-  0x8769, // ExifIFDPointer (structural, not real content)
-  0xa001, // ColorSpace
-  0xa002, // PixelXDimension
-  0xa003, // PixelYDimension
+// Only location and orientation are treated as worth protecting — anything
+// else is safe to discard when rewriting the eXIf chunk. Deliberately a
+// blocklist, not an allowlist: real backlog files carry a fair amount of
+// auto-generated format/version metadata (EXIF/FlashPix version markers,
+// component config, scene-capture-type, resolution, dimensions, colorspace,
+// ...) that varies file to file — an allowlist kept missing tags we hadn't
+// seen yet and falsely blocking fixable files.
+const PROTECTED_EXIF_TAGS = new Set([
+  0x0112, // Orientation
+  0x8825, // GPSInfoIFDPointer
 ]);
 
 const DATE_EXIF_TAGS = new Set([0x0132, 0x9003, 0x9004]);
@@ -184,8 +182,7 @@ function readExifTagSet(data: Buffer): Set<number> {
 function exifChunkBlocksRewrite(exifData: Buffer): boolean {
   const tags = readExifTagSet(exifData);
   for (const tag of tags) {
-    if (DATE_EXIF_TAGS.has(tag)) return true;
-    if (!SAFE_TO_DISCARD_EXIF_TAGS.has(tag)) return true;
+    if (DATE_EXIF_TAGS.has(tag) || PROTECTED_EXIF_TAGS.has(tag)) return true;
   }
   return false;
 }

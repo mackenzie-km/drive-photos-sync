@@ -114,6 +114,23 @@ function buildExifChunkWithOrientationOnly(): Buffer {
   return buf;
 }
 
+function buildExifChunkWithGpsPointerOnly(): Buffer {
+  // Minimal TIFF/EXIF blob carrying only GPSInfoIFDPointer (0x8825) — no
+  // DateTime/DateTimeOriginal anywhere. Only the presence of the pointer tag
+  // in IFD0 matters for blocking; the GPS sub-IFD itself isn't walked.
+  const buf = Buffer.alloc(8 + 2 + 12 + 4);
+  buf.write("MM", 0, "ascii");
+  buf.writeUInt16BE(42, 2);
+  buf.writeUInt32BE(8, 4); // ifd0Offset
+  buf.writeUInt16BE(1, 8); // numEntries
+  buf.writeUInt16BE(0x8825, 10); // tag: GPSInfoIFDPointer
+  buf.writeUInt16BE(4, 12); // type: LONG
+  buf.writeUInt32BE(1, 14); // count
+  buf.writeUInt32BE(999, 18); // bogus sub-IFD offset — never followed for GPS
+  buf.writeUInt32BE(0, 22); // next IFD offset
+  return buf;
+}
+
 const BASE_PNG = buildPng([]);
 
 describe("resolvePngDate", () => {
@@ -147,6 +164,16 @@ describe("resolvePngDate", () => {
     expect(resolvePngDate(png)).toEqual({ action: "none" });
   });
 
+  it("returns none when a dateless eXIf chunk carries a tag worth protecting (GPS)", () => {
+    const xmp = xmpWithDateCreated("2019--1-02T14:30:00-08:00");
+    const png = buildPng([
+      { type: "eXIf", data: buildExifChunkWithGpsPointerOnly() },
+      { type: "iTXt", data: buildITXtChunk("XML:com.adobe.xmp", xmp) },
+    ]);
+
+    expect(resolvePngDate(png)).toEqual({ action: "none" });
+  });
+
   it("recovers from XMP when the dateless eXIf chunk only has auto-derived tags (dimensions/colorspace)", () => {
     // Real eXIf chunk bytes captured from an actual backlog file
     // (IMG_1259.png): IFD0 -> ExifIFDPointer only -> sub-IFD with
@@ -167,6 +194,29 @@ describe("resolvePngDate", () => {
     expect(result.action).toBe("fixed");
     if (result.action !== "fixed") throw new Error("unreachable");
     expect(readExifDateTimeOriginal(result.buffer)).toBe("2018:04:01 20:43:48");
+  });
+
+  it("recovers from XMP when the dateless eXIf chunk has EXIF/FlashPix version and scene-type markers (no location/orientation)", () => {
+    // Real eXIf chunk bytes captured from an actual backlog file
+    // (IMG_2532.png): carries ExifVersion, ComponentsConfiguration,
+    // FlashpixVersion, and SceneCaptureType alongside the usual dimensions/
+    // colorspace/resolution tags — none of which are location or
+    // orientation, so this should fall through to XMP recovery.
+    const realVersionMarkersExif = Buffer.from(
+      "4d4d002a000000080004011a0005000000010000003e011b0005000000010000004601280003000000010002000087690004000000010000004e00000000000000480000000100000048000000010007900000070000000430323231910100070000000401020300a00000070000000430313030a00100030000000100010000a0020004000000010000023fa0030004000000010000023fa4060003000000010000000000000000",
+      "hex",
+    );
+    // monthField=-1, dayField=00 -> realMonth = 0 - 10*(-1) = 10 (October)
+    const xmp = xmpWithDateCreated("2018--1-00T15:26:12-07:00");
+    const png = buildPng([
+      { type: "eXIf", data: realVersionMarkersExif },
+      { type: "iTXt", data: buildITXtChunk("XML:com.adobe.xmp", xmp) },
+    ]);
+
+    const result = resolvePngDate(png);
+    expect(result.action).toBe("fixed");
+    if (result.action !== "fixed") throw new Error("unreachable");
+    expect(readExifDateTimeOriginal(result.buffer)).toBe("2018:10:01 15:26:12");
   });
 
   it("returns needs-fallback when there is no eXIf and no iTXt chunk at all", () => {
