@@ -116,51 +116,6 @@ function writePngDate(png, date) {
     const parts = [PNG_SIGNATURE, ...newChunks.map((c) => serializeChunk(c.type, c.data))];
     return Buffer.concat(parts);
 }
-// Generic IFD walk — does not share buildExifBlob's offset assumptions.
-function readExifDate(data) {
-    const byteOrder = data.subarray(0, 2).toString("ascii");
-    const endian = byteOrder === "II" ? "LE" : "BE";
-    const read16 = (o) => (endian === "LE" ? data.readUInt16LE(o) : data.readUInt16BE(o));
-    const read32 = (o) => (endian === "LE" ? data.readUInt32LE(o) : data.readUInt32BE(o));
-    const ifd0Offset = read32(4);
-    function readIfd(offset) {
-        const numEntries = read16(offset);
-        const map = new Map();
-        for (let i = 0; i < numEntries; i++) {
-            const entryOffset = offset + 2 + i * 12;
-            const tag = read16(entryOffset);
-            const type = read16(entryOffset + 2);
-            const count = read32(entryOffset + 4);
-            const valueRaw = data.subarray(entryOffset + 8, entryOffset + 12);
-            map.set(tag, { type, count, valueRaw });
-        }
-        return map;
-    }
-    function decodeAscii(entry) {
-        const size = entry.count;
-        let raw;
-        if (size <= 4) {
-            raw = entry.valueRaw.subarray(0, size);
-        }
-        else {
-            const offset = endian === "LE" ? entry.valueRaw.readUInt32LE(0) : entry.valueRaw.readUInt32BE(0);
-            raw = data.subarray(offset, offset + size);
-        }
-        return raw.toString("ascii").replace(/\0+$/, "");
-    }
-    const ifd0 = readIfd(ifd0Offset);
-    const result = {};
-    if (ifd0.has(0x0132))
-        result.dateTime = decodeAscii(ifd0.get(0x0132));
-    if (ifd0.has(0x8769)) {
-        const ptrEntry = ifd0.get(0x8769);
-        const exifIfdOffset = endian === "LE" ? ptrEntry.valueRaw.readUInt32LE(0) : ptrEntry.valueRaw.readUInt32BE(0);
-        const exifIfd = readIfd(exifIfdOffset);
-        if (exifIfd.has(0x9003))
-            result.dateTimeOriginal = decodeAscii(exifIfd.get(0x9003));
-    }
-    return result;
-}
 function decodeITXt(chunkData) {
     const idx = chunkData.indexOf(0);
     if (idx === -1)
@@ -193,18 +148,26 @@ function readXmpRecoveredDate(chunks) {
         const text = decodeITXt(chunk.data);
         if (!text)
             continue;
-        const match = text.match(/photoshop:DateCreated>(\d{4})-(-?\d{1,2})-(-?\d{1,2})T(\d{2}):(\d{2}):(\d{2})([+-]\d{2}:\d{2})</);
+        // The trailing offset group is only used to validate the field's shape
+        // (a well-formed ISO 8601 offset) — its value is intentionally discarded
+        // below. EXIF DateTimeOriginal has no timezone concept; it's the literal
+        // local wall-clock time, verbatim. Converting through it (e.g. via
+        // `new Date(isoString)` read back with UTC getters) would silently shift
+        // the recovered time by the offset instead of preserving it.
+        const match = text.match(/photoshop:DateCreated>(\d{4})-(-?\d{1,2})-(-?\d{1,2})T(\d{2}):(\d{2}):(\d{2})[+-]\d{2}:\d{2}</);
         if (!match)
             continue;
-        const [, yearStr, monthFieldStr, dayFieldStr, hh, mm, ss, offset] = match;
+        const [, yearStr, monthFieldStr, dayFieldStr, hh, mm, ss] = match;
         const monthField = parseInt(monthFieldStr, 10);
         const dayField = parseInt(dayFieldStr, 10);
         const realMonth = dayField - 10 * monthField;
         if (realMonth < 1 || realMonth > 12)
             continue; // doesn't fit the known corruption shape — bail
-        const pad2 = (n) => String(n).padStart(2, "0");
-        const isoString = `${yearStr}-${pad2(realMonth)}-01T${hh}:${mm}:${ss}${offset}`;
-        const date = new Date(isoString);
+        const year = parseInt(yearStr, 10);
+        const hour = parseInt(hh, 10);
+        const minute = parseInt(mm, 10);
+        const second = parseInt(ss, 10);
+        const date = new Date(Date.UTC(year, realMonth - 1, 1, hour, minute, second));
         if (isNaN(date.getTime()))
             continue;
         return date;
@@ -212,9 +175,13 @@ function readXmpRecoveredDate(chunks) {
     return null;
 }
 // Decides how (if at all) to fix a PNG's embedded date, in priority order:
-//   1. Valid eXIf DateTimeOriginal/DateTime already present -> leave untouched.
-//      (Confirmed via a real Google Photos upload test that this displays
-//      correctly as-is — no rewrite needed.)
+//   1. Any eXIf chunk already present -> leave untouched, whether or not it
+//      has a date. (Confirmed via a real Google Photos upload test that a
+//      valid date displays correctly as-is — no rewrite needed. A dateless
+//      eXIf chunk is left alone too: writePngDate replaces the whole chunk
+//      wholesale, so rewriting it would silently destroy any other tags it
+//      carries, e.g. Orientation or GPS — safer to leave a narrow subset of
+//      dateless-EXIF files unfixed than risk losing that data.)
 //   2. Corrupted XMP photoshop:DateCreated recoverable via the known formula
 //      -> write a corrected eXIf chunk (day defaults to the 1st, since it's
 //      not recoverable from this field).
@@ -226,12 +193,8 @@ function readXmpRecoveredDate(chunks) {
 function resolvePngDate(buffer) {
     try {
         const chunks = parseChunks(buffer);
-        const exifChunk = chunks.find((c) => c.type === "eXIf");
-        if (exifChunk) {
-            const exifDate = readExifDate(exifChunk.data);
-            if (exifDate.dateTimeOriginal || exifDate.dateTime) {
-                return { action: "none" };
-            }
+        if (chunks.some((c) => c.type === "eXIf")) {
+            return { action: "none" };
         }
         const recoveredDate = readXmpRecoveredDate(chunks);
         if (recoveredDate) {

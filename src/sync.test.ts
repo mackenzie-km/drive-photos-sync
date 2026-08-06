@@ -488,7 +488,9 @@ describe("startSync — PNG date fix", () => {
 
     expect(mockGetFileCreatedTime).not.toHaveBeenCalled();
     const uploadedBuffer = await streamToBuffer(mockUploadPhoto.mock.calls[0][1]);
-    expect(readExifDateTimeOriginal(uploadedBuffer)).toBe("2019:12:01 22:30:00");
+    // Local wall-clock time is preserved verbatim; the -08:00 offset is
+    // intentionally discarded rather than applied as a UTC conversion.
+    expect(readExifDateTimeOriginal(uploadedBuffer)).toBe("2019:12:01 14:30:00");
   });
 
   it("falls back to Drive createdTime when neither EXIF nor XMP recovery works", async () => {
@@ -528,6 +530,51 @@ describe("startSync — PNG date fix", () => {
     expect(mockGetFileCreatedTime).not.toHaveBeenCalled();
     const uploadedBuffer = await streamToBuffer(mockUploadPhoto.mock.calls[0][1]);
     expect(uploadedBuffer).toEqual(Buffer.from("fake-image-data"));
+  });
+
+  it("uploads unmodified when the createdTime fallback fetch fails with a non-auth error", async () => {
+    mockGetUninitializedFiles.mockResolvedValueOnce([PNG_FILE]).mockResolvedValue([]);
+    mockDownloadDriveFile.mockResolvedValueOnce(basePng);
+    mockGetFileCreatedTime.mockRejectedValue(new Error("Drive API unavailable"));
+
+    await startSync("user-png-fallback-fails", false, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockUpdateFileStatus).toHaveBeenCalledWith(
+      "uploaded",
+      "media-id-123",
+      null,
+      0,
+      PNG_FILE.id,
+      "user-png-fallback-fails",
+    );
+    const uploadedBuffer = await streamToBuffer(mockUploadPhoto.mock.calls[0][1]);
+    expect(uploadedBuffer).toEqual(basePng);
+  });
+
+  it("halts the run instead of uploading when the createdTime fallback hits a Drive auth error", async () => {
+    mockGetUninitializedFiles.mockResolvedValueOnce([PNG_FILE]).mockResolvedValue([]);
+    mockDownloadDriveFile.mockResolvedValueOnce(basePng);
+
+    const authError = Object.assign(new Error("Invalid Credentials"), {
+      code: 401,
+      response: {
+        status: 401,
+        data: { error: { errors: [{ reason: "authError" }] } },
+      },
+    });
+    mockGetFileCreatedTime.mockRejectedValue(authError);
+
+    await startSync("user-png-fallback-auth-error", false, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockUploadPhoto).not.toHaveBeenCalled();
+    expect(mockUpdateFileStatus).not.toHaveBeenCalled();
+    expect(mockUpdateSyncRun).toHaveBeenCalledWith(
+      "token_expired",
+      expect.any(Number),
+      "user-png-fallback-auth-error",
+    );
   });
 });
 

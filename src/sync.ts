@@ -331,17 +331,36 @@ async function runSync(
         }
 
         // Best-effort PNG date fix (see pngDate.ts) — scoped to PNG only.
-        // Never allowed to fail the upload: resolvePngDate/applyFallbackDate
-        // never throw, and a failed createdTime fetch just skips the fix.
+        // resolvePngDate/applyFallbackDate never throw; the only way this can
+        // fail is the createdTime fetch below, handled the same way as the
+        // main download a few lines up — a Drive auth error halts the run
+        // (the token isn't coming back mid-run), anything else just skips
+        // the fix and uploads the file unmodified.
         if (file.mime_type === "image/png") {
           const resolution = resolvePngDate(fileBuffer);
           if (resolution.action === "fixed") {
             fileBuffer = resolution.buffer;
+            console.log(`[sync:${userId}]   date fix: ${file.name} recovered via XMP`);
           } else if (resolution.action === "needs-fallback") {
-            const createdTime = await withRetry(() =>
-              getFileCreatedTime(driveAuth, file.id),
-            ).catch(() => null);
-            if (createdTime) fileBuffer = applyFallbackDate(fileBuffer, createdTime);
+            let createdTime: Date | null = null;
+            try {
+              createdTime = await withRetry(() => getFileCreatedTime(driveAuth, file.id));
+            } catch (createdTimeErr: any) {
+              if (isDriveAuthError(createdTimeErr)) {
+                console.log(
+                  `[sync:${userId}]   Drive token expired during date-fix fallback — halting run instead of failing the rest of the queue.`,
+                );
+                driveTokenExpired = true;
+                break;
+              }
+              console.log(
+                `[sync:${userId}]   date fix: ${file.name} createdTime fetch failed (${createdTimeErr.message}) — uploading without a date fix`,
+              );
+            }
+            if (createdTime) {
+              fileBuffer = applyFallbackDate(fileBuffer, createdTime);
+              console.log(`[sync:${userId}]   date fix: ${file.name} used Drive createdTime fallback`);
+            }
           }
         }
 

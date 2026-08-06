@@ -4,6 +4,9 @@ One line per real design/behavior decision, grouped by branch. Trivial
 changes (wording, formatting, docs-only edits) are intentionally skipped —
 this is not a changelog of every commit.
 
+## feature/png-exif-date-fix
+- Dateless eXIf chunks are now left untouched instead of stripped and replaced with an XMP-recovered date, since writePngDate replaces the whole chunk and would silently drop other tags like Orientation or GPS; recovered XMP timestamps now use Date.UTC to preserve local wall-clock time verbatim rather than converting through the parsed offset; and a Drive auth error during the createdTime fallback fetch now halts the sync run instead of silently uploading undated.
+
 ## worktree-agent-aa03ccc8306912487
 - Removed the now-unused `/sync/status` REST endpoint (route, docs, and startup log message) since SSE fully replaced it and nothing still called it.
 

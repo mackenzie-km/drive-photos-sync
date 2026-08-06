@@ -79,6 +79,22 @@ function readExifDateTimeOriginal(png: Buffer): string | undefined {
   return undefined;
 }
 
+function buildExifChunkWithOrientationOnly(): Buffer {
+  // Minimal TIFF/EXIF blob carrying a single non-date tag (Orientation,
+  // 0x0112, SHORT, value=1) — no DateTime/DateTimeOriginal anywhere.
+  const buf = Buffer.alloc(8 + 2 + 12 + 4);
+  buf.write("MM", 0, "ascii");
+  buf.writeUInt16BE(42, 2);
+  buf.writeUInt32BE(8, 4); // ifd0Offset
+  buf.writeUInt16BE(1, 8); // numEntries
+  buf.writeUInt16BE(0x0112, 10); // tag: Orientation
+  buf.writeUInt16BE(3, 12); // type: SHORT
+  buf.writeUInt32BE(1, 14); // count
+  buf.writeUInt16BE(1, 18); // value (left-justified in the 4-byte field)
+  buf.writeUInt32BE(0, 22); // next IFD offset
+  return buf;
+}
+
 const BASE_PNG = buildPng([]);
 
 describe("resolvePngDate", () => {
@@ -96,8 +112,23 @@ describe("resolvePngDate", () => {
     expect(result.action).toBe("fixed");
     if (result.action !== "fixed") throw new Error("unreachable");
 
-    // day defaults to the 1st; year/time/offset are preserved from the XMP
-    expect(readExifDateTimeOriginal(result.buffer)).toBe("2019:12:01 22:30:00");
+    // day defaults to the 1st; year and local wall-clock time are preserved
+    // verbatim from the XMP — the -08:00 offset is intentionally discarded
+    // rather than applied as a UTC conversion (EXIF has no timezone concept).
+    expect(readExifDateTimeOriginal(result.buffer)).toBe("2019:12:01 14:30:00");
+  });
+
+  it("returns none (does not rewrite) when eXIf exists with no date, even if XMP recovery would otherwise succeed", () => {
+    const xmp = xmpWithDateCreated("2019--1-02T14:30:00-08:00");
+    const png = buildPng([
+      { type: "eXIf", data: buildExifChunkWithOrientationOnly() },
+      { type: "iTXt", data: buildITXtChunk("XML:com.adobe.xmp", xmp) },
+    ]);
+
+    // Confirms the dateless eXIf chunk (and whatever else it carries, e.g.
+    // Orientation here) is left alone rather than being stripped and
+    // replaced by writePngDate's XMP-recovered date.
+    expect(resolvePngDate(png)).toEqual({ action: "none" });
   });
 
   it("returns needs-fallback when there is no eXIf and no iTXt chunk at all", () => {
