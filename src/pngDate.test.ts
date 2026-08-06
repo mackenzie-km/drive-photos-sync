@@ -137,17 +137,36 @@ describe("resolvePngDate", () => {
     expect(readExifDateTimeOriginal(result.buffer)).toBe("2019:12:01 14:30:00");
   });
 
-  it("returns none (does not rewrite) when eXIf exists with no date, even if XMP recovery would otherwise succeed", () => {
+  it("returns none when a dateless eXIf chunk carries a tag worth protecting (Orientation)", () => {
     const xmp = xmpWithDateCreated("2019--1-02T14:30:00-08:00");
     const png = buildPng([
       { type: "eXIf", data: buildExifChunkWithOrientationOnly() },
       { type: "iTXt", data: buildITXtChunk("XML:com.adobe.xmp", xmp) },
     ]);
 
-    // Confirms the dateless eXIf chunk (and whatever else it carries, e.g.
-    // Orientation here) is left alone rather than being stripped and
-    // replaced by writePngDate's XMP-recovered date.
     expect(resolvePngDate(png)).toEqual({ action: "none" });
+  });
+
+  it("recovers from XMP when the dateless eXIf chunk only has auto-derived tags (dimensions/colorspace)", () => {
+    // Real eXIf chunk bytes captured from an actual backlog file
+    // (IMG_1259.png): IFD0 -> ExifIFDPointer only -> sub-IFD with
+    // ColorSpace/PixelXDimension/PixelYDimension, nothing else. Confirms
+    // this shape falls through to XMP recovery rather than being blocked.
+    const realDimensionsOnlyExif = Buffer.from(
+      "4d4d002a00000008000187690004000000010000001a000000000003a00100030000000100010000a00200040000000100000533a003000400000001000003e800000000",
+      "hex",
+    );
+    // monthField=00, dayField=04 -> realMonth = 4 (April)
+    const xmp = xmpWithDateCreated("2018-00-04T20:43:48-07:00");
+    const png = buildPng([
+      { type: "eXIf", data: realDimensionsOnlyExif },
+      { type: "iTXt", data: buildITXtChunk("XML:com.adobe.xmp", xmp) },
+    ]);
+
+    const result = resolvePngDate(png);
+    expect(result.action).toBe("fixed");
+    if (result.action !== "fixed") throw new Error("unreachable");
+    expect(readExifDateTimeOriginal(result.buffer)).toBe("2018:04:01 20:43:48");
   });
 
   it("returns needs-fallback when there is no eXIf and no iTXt chunk at all", () => {

@@ -5,7 +5,8 @@ changes (wording, formatting, docs-only edits) are intentionally skipped —
 this is not a changelog of every commit.
 
 ## feature/png-exif-date-fix
-- PNG date is resolved in priority order: existing EXIF date (used as-is) -> recovered from a corrupted XMP field via a known formula -> Drive's createdTime as a last resort. A PNG with an EXIF chunk but no date is left untouched rather than rewritten, since rewriting would drop any other tags (e.g. Orientation) it carries.
+- PNG date is resolved in priority order: existing EXIF date (used as-is) -> recovered from a corrupted XMP field via a known formula -> Drive's createdTime as a last resort.
+- A dateless eXIf chunk only blocks rewriting if it carries a tag worth protecting (Orientation, GPS, ...); chunks with only auto-derived tags (dimensions, colorspace, resolution) are treated as safe to discard, since real-world upload testing showed Google Photos permanently dedupes unmodified re-uploads to the existing (wrongly-dated) item — leaving such files alone meant they could never be fixed at all.
 
 ## worktree-agent-aa03ccc8306912487
 - Removed the now-unused `/sync/status` REST endpoint (route, docs, and startup log message) since SSE fully replaced it and nothing still called it.

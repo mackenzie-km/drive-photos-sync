@@ -136,6 +136,60 @@ function writePngDate(png: Buffer, date: Date): Buffer {
   return Buffer.concat(parts);
 }
 
+// Tags we're comfortable discarding when rewriting the eXIf chunk — all
+// auto-derived from the image itself (dimensions, colorspace, resolution),
+// nothing a person would notice missing. Anything else (Orientation, GPS,
+// Make/Model, ...) is treated as worth protecting.
+const SAFE_TO_DISCARD_EXIF_TAGS = new Set([
+  0x011a, // XResolution
+  0x011b, // YResolution
+  0x0128, // ResolutionUnit
+  0x8769, // ExifIFDPointer (structural, not real content)
+  0xa001, // ColorSpace
+  0xa002, // PixelXDimension
+  0xa003, // PixelYDimension
+]);
+
+const DATE_EXIF_TAGS = new Set([0x0132, 0x9003, 0x9004]);
+
+function readExifTagSet(data: Buffer): Set<number> {
+  const byteOrder = data.subarray(0, 2).toString("ascii");
+  const endian = byteOrder === "II" ? "LE" : "BE";
+  const read16 = (o: number) => (endian === "LE" ? data.readUInt16LE(o) : data.readUInt16BE(o));
+  const read32 = (o: number) => (endian === "LE" ? data.readUInt32LE(o) : data.readUInt32BE(o));
+
+  const tags = new Set<number>();
+  const subIfdOffsets: number[] = [];
+
+  function readIfd(offset: number) {
+    const numEntries = read16(offset);
+    for (let i = 0; i < numEntries; i++) {
+      const entryOffset = offset + 2 + i * 12;
+      const tag = read16(entryOffset);
+      tags.add(tag);
+      if (tag === 0x8769) {
+        const valueRaw = data.subarray(entryOffset + 8, entryOffset + 12);
+        subIfdOffsets.push(endian === "LE" ? valueRaw.readUInt32LE(0) : valueRaw.readUInt32BE(0));
+      }
+    }
+  }
+
+  readIfd(read32(4));
+  for (const offset of subIfdOffsets) readIfd(offset);
+  return tags;
+}
+
+// True if this eXIf chunk already has a real date, or carries any tag worth
+// protecting from writePngDate's wholesale chunk replacement.
+function exifChunkBlocksRewrite(exifData: Buffer): boolean {
+  const tags = readExifTagSet(exifData);
+  for (const tag of tags) {
+    if (DATE_EXIF_TAGS.has(tag)) return true;
+    if (!SAFE_TO_DISCARD_EXIF_TAGS.has(tag)) return true;
+  }
+  return false;
+}
+
 function decodeITXt(chunkData: Buffer): string | null {
   const idx = chunkData.indexOf(0);
   if (idx === -1) return null;
@@ -186,15 +240,17 @@ function readXmpRecoveredDate(chunks: PngChunk[]): Date | null {
   return null;
 }
 
-// Priority: existing eXIf (untouched, even without a date — rewriting would
-// destroy other tags like Orientation) -> XMP recovery -> caller-supplied
-// fallback via applyFallbackDate. Never throws; a parse failure is treated
-// as needs-fallback.
+// Priority: existing eXIf with a date, or with any tag worth protecting
+// (Orientation, GPS, ...) -> left untouched. Otherwise (no eXIf, or one
+// containing only auto-derived tags like dimensions/colorspace) -> XMP
+// recovery -> caller-supplied fallback via applyFallbackDate. Never throws;
+// a parse failure is treated as needs-fallback.
 export function resolvePngDate(buffer: Buffer): PngDateResolution {
   try {
     const chunks = parseChunks(buffer);
 
-    if (chunks.some((c) => c.type === "eXIf")) {
+    const exifChunk = chunks.find((c) => c.type === "eXIf");
+    if (exifChunk && exifChunkBlocksRewrite(exifChunk.data)) {
       return { action: "none" };
     }
 
