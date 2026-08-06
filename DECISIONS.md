@@ -5,7 +5,7 @@ changes (wording, formatting, docs-only edits) are intentionally skipped —
 this is not a changelog of every commit.
 
 ## feature/png-exif-date-fix
-- Dateless eXIf chunks are now left untouched instead of stripped and replaced with an XMP-recovered date, since writePngDate replaces the whole chunk and would silently drop other tags like Orientation or GPS; recovered XMP timestamps now use Date.UTC to preserve local wall-clock time verbatim rather than converting through the parsed offset; and a Drive auth error during the createdTime fallback fetch now halts the sync run instead of silently uploading undated.
+- PNG date is resolved in priority order: existing EXIF date (used as-is) -> recovered from a corrupted XMP field via a known formula -> Drive's createdTime as a last resort. A PNG with an EXIF chunk but no date is left untouched rather than rewritten, since rewriting would drop any other tags (e.g. Orientation) it carries.
 
 ## worktree-agent-aa03ccc8306912487
 - Removed the now-unused `/sync/status` REST endpoint (route, docs, and startup log message) since SSE fully replaced it and nothing still called it.

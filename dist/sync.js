@@ -241,11 +241,12 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
                     throw downloadErr;
                 }
                 // Best-effort PNG date fix (see pngDate.ts) — scoped to PNG only.
-                // resolvePngDate/applyFallbackDate never throw; the only way this can
-                // fail is the createdTime fetch below, handled the same way as the
-                // main download a few lines up — a Drive auth error halts the run
-                // (the token isn't coming back mid-run), anything else just skips
-                // the fix and uploads the file unmodified.
+                // resolvePngDate/applyFallbackDate never throw. The createdTime
+                // fallback fetch below is independent of the download above (the
+                // file already has its bytes) — any failure there, including an
+                // expired token, just skips the fix and uploads undated rather than
+                // halting the run; a genuinely expired token still gets caught
+                // normally at the next file's download.
                 if (file.mime_type === "image/png") {
                     const resolution = (0, pngDate_1.resolvePngDate)(fileBuffer);
                     if (resolution.action === "fixed") {
@@ -253,18 +254,10 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
                         console.log(`[sync:${userId}]   date fix: ${file.name} recovered via XMP`);
                     }
                     else if (resolution.action === "needs-fallback") {
-                        let createdTime = null;
-                        try {
-                            createdTime = await (0, retry_1.withRetry)(() => (0, drive_1.getFileCreatedTime)(driveAuth, file.id));
-                        }
-                        catch (createdTimeErr) {
-                            if (isDriveAuthError(createdTimeErr)) {
-                                console.log(`[sync:${userId}]   Drive token expired during date-fix fallback — halting run instead of failing the rest of the queue.`);
-                                driveTokenExpired = true;
-                                break;
-                            }
-                            console.log(`[sync:${userId}]   date fix: ${file.name} createdTime fetch failed (${createdTimeErr.message}) — uploading without a date fix`);
-                        }
+                        const createdTime = await (0, retry_1.withRetry)(() => (0, drive_1.getFileCreatedTime)(driveAuth, file.id)).catch((err) => {
+                            console.log(`[sync:${userId}]   date fix: ${file.name} createdTime fetch failed (${err.message}) — uploading undated`);
+                            return null;
+                        });
                         if (createdTime) {
                             fileBuffer = (0, pngDate_1.applyFallbackDate)(fileBuffer, createdTime);
                             console.log(`[sync:${userId}]   date fix: ${file.name} used Drive createdTime fallback`);

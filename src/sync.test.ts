@@ -552,7 +552,11 @@ describe("startSync — PNG date fix", () => {
     expect(uploadedBuffer).toEqual(basePng);
   });
 
-  it("halts the run instead of uploading when the createdTime fallback hits a Drive auth error", async () => {
+  it("still uploads undated (does not halt the run) when the createdTime fallback hits a Drive auth error", async () => {
+    // Unlike a failed download, a failed date-fix fallback doesn't need to
+    // halt the run — the file already has its bytes and can upload without
+    // a date fix. A genuinely expired token still gets caught normally at
+    // the next file's real download.
     mockGetUninitializedFiles.mockResolvedValueOnce([PNG_FILE]).mockResolvedValue([]);
     mockDownloadDriveFile.mockResolvedValueOnce(basePng);
 
@@ -568,13 +572,16 @@ describe("startSync — PNG date fix", () => {
     await startSync("user-png-fallback-auth-error", false, "folder-id");
     await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
 
-    expect(mockUploadPhoto).not.toHaveBeenCalled();
-    expect(mockUpdateFileStatus).not.toHaveBeenCalled();
-    expect(mockUpdateSyncRun).toHaveBeenCalledWith(
-      "token_expired",
-      expect.any(Number),
+    expect(mockUpdateFileStatus).toHaveBeenCalledWith(
+      "uploaded",
+      "media-id-123",
+      null,
+      0,
+      PNG_FILE.id,
       "user-png-fallback-auth-error",
     );
+    const uploadedBuffer = await streamToBuffer(mockUploadPhoto.mock.calls[0][1]);
+    expect(uploadedBuffer).toEqual(basePng);
   });
 });
 

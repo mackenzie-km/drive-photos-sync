@@ -26,13 +26,8 @@ function parseChunks(png: Buffer): PngChunk[] {
     pos += 8 + length + 4; // length + type + data + crc
     if (type === "IEND") break;
   }
-  // A corrupted/garbage length field on some earlier chunk can make
-  // Buffer.subarray silently over- or under-read (it clamps rather than
-  // throwing), which can swallow the real IEND chunk into a preceding
-  // chunk's data without ever raising an exception — the loop just runs out
-  // of buffer. That would let a mis-parsed structure through and produce a
-  // reconstructed PNG missing its terminator. Guard against that explicitly:
-  // a well-formed chunk stream must end with a chunk genuinely typed IEND.
+  // Buffer.subarray clamps instead of throwing, so a corrupted length field
+  // could silently swallow IEND without an exception — require it explicitly.
   if (chunks.length === 0 || chunks[chunks.length - 1].type !== "IEND") {
     throw new Error("PNG chunk stream did not terminate in a valid IEND chunk");
   }
@@ -57,12 +52,8 @@ function formatExifDate(date: Date): string {
   );
 }
 
-// Builds a minimal, spec-compliant EXIF/TIFF blob (big-endian) containing:
-//   IFD0: DateTime (0x0132) + ExifIFDPointer (0x8769)
-//   Exif sub-IFD: DateTimeOriginal (0x9003) + DateTimeDigitized (0x9004)
-// Both IFD0's DateTime and the sub-IFD's DateTimeOriginal are set, since it's
-// undocumented which one Google Photos actually reads — covering both maximizes
-// the chance this is honored.
+// Sets both IFD0's DateTime and the Exif sub-IFD's DateTimeOriginal, since
+// it's undocumented which one Google Photos actually reads.
 function buildExifBlob(date: Date): Buffer {
   const dateStr = formatExifDate(date) + "\0"; // 20 bytes incl. null terminator
   if (dateStr.length !== 20) throw new Error("unexpected date string length");
@@ -82,12 +73,10 @@ function buildExifBlob(date: Date): Buffer {
 
   const buf = Buffer.alloc(totalSize);
 
-  // TIFF header
   buf.write("MM", 0, "ascii");
   buf.writeUInt16BE(42, 2);
   buf.writeUInt32BE(ifd0Offset, 4);
 
-  // IFD0
   let pos = ifd0Offset;
   buf.writeUInt16BE(IFD0_ENTRY_COUNT, pos);
   pos += 2;
@@ -106,7 +95,6 @@ function buildExifBlob(date: Date): Buffer {
 
   buf.write(dateStr, dateTimeDataOffset, "ascii");
 
-  // Exif sub-IFD
   pos = exifIfdOffset;
   buf.writeUInt16BE(EXIF_IFD_ENTRY_COUNT, pos);
   pos += 2;
@@ -128,9 +116,7 @@ function buildExifBlob(date: Date): Buffer {
   return buf;
 }
 
-// Replaces (or inserts) the PNG's eXIf chunk with a freshly-built minimal one
-// carrying DateTimeOriginal/DateTime = the given date. Nothing else in the
-// file is touched.
+// Replaces (or inserts) the eXIf chunk; nothing else in the file is touched.
 function writePngDate(png: Buffer, date: Date): Buffer {
   const chunks = parseChunks(png);
   const exifBlob = buildExifBlob(date);
@@ -165,25 +151,19 @@ function decodeITXt(chunkData: Buffer): string | null {
   return text.toString("utf8");
 }
 
-// Backlog PNGs' XMP photoshop:DateCreated is systematically corrupted by
-// whatever tool wrote it: the real month ends up split across the month/day
-// slots as two decimal digits (real month = XMP_day - 10*XMP_month, verified
-// against 18 real backlog files with zero exceptions). Day-of-month is not
-// encoded anywhere in this field at all — year, time, and timezone offset are
-// unaffected. Returns null if the field is absent or doesn't match the
-// expected shape (fail safe rather than guess).
+// Some backlog PNGs' XMP photoshop:DateCreated has a corrupted month: the
+// real month ends up split across the month/day fields as two decimal
+// digits (real month = XMP_day - 10*XMP_month, verified against 18 real
+// files). Day-of-month isn't recoverable from this field at all.
 function readXmpRecoveredDate(chunks: PngChunk[]): Date | null {
   for (const chunk of chunks) {
     if (chunk.type !== "iTXt") continue;
     const text = decodeITXt(chunk.data);
     if (!text) continue;
 
-    // The trailing offset group is only used to validate the field's shape
-    // (a well-formed ISO 8601 offset) — its value is intentionally discarded
-    // below. EXIF DateTimeOriginal has no timezone concept; it's the literal
-    // local wall-clock time, verbatim. Converting through it (e.g. via
-    // `new Date(isoString)` read back with UTC getters) would silently shift
-    // the recovered time by the offset instead of preserving it.
+    // Offset is only used to validate the field's shape, then discarded —
+    // EXIF has no timezone concept, so the local wall-clock digits are
+    // preserved verbatim rather than converted through the offset.
     const match = text.match(
       /photoshop:DateCreated>(\d{4})-(-?\d{1,2})-(-?\d{1,2})T(\d{2}):(\d{2}):(\d{2})[+-]\d{2}:\d{2}</,
     );
@@ -193,7 +173,7 @@ function readXmpRecoveredDate(chunks: PngChunk[]): Date | null {
     const monthField = parseInt(monthFieldStr, 10);
     const dayField = parseInt(dayFieldStr, 10);
     const realMonth = dayField - 10 * monthField;
-    if (realMonth < 1 || realMonth > 12) continue; // doesn't fit the known corruption shape — bail
+    if (realMonth < 1 || realMonth > 12) continue;
 
     const year = parseInt(yearStr, 10);
     const hour = parseInt(hh, 10);
@@ -206,22 +186,10 @@ function readXmpRecoveredDate(chunks: PngChunk[]): Date | null {
   return null;
 }
 
-// Decides how (if at all) to fix a PNG's embedded date, in priority order:
-//   1. Any eXIf chunk already present -> leave untouched, whether or not it
-//      has a date. (Confirmed via a real Google Photos upload test that a
-//      valid date displays correctly as-is — no rewrite needed. A dateless
-//      eXIf chunk is left alone too: writePngDate replaces the whole chunk
-//      wholesale, so rewriting it would silently destroy any other tags it
-//      carries, e.g. Orientation or GPS — safer to leave a narrow subset of
-//      dateless-EXIF files unfixed than risk losing that data.)
-//   2. Corrupted XMP photoshop:DateCreated recoverable via the known formula
-//      -> write a corrected eXIf chunk (day defaults to the 1st, since it's
-//      not recoverable from this field).
-//   3. Neither -> caller must supply a fallback date (e.g. Drive createdTime)
-//      via applyFallbackDate.
-// Never throws — any parse failure is treated as needs-fallback, since this
-// is a best-effort enhancement that must never be able to fail an upload
-// that would otherwise succeed.
+// Priority: existing eXIf (untouched, even without a date — rewriting would
+// destroy other tags like Orientation) -> XMP recovery -> caller-supplied
+// fallback via applyFallbackDate. Never throws; a parse failure is treated
+// as needs-fallback.
 export function resolvePngDate(buffer: Buffer): PngDateResolution {
   try {
     const chunks = parseChunks(buffer);
@@ -241,8 +209,6 @@ export function resolvePngDate(buffer: Buffer): PngDateResolution {
   }
 }
 
-// Same never-throws invariant as resolvePngDate — if the buffer somehow
-// can't be rewritten, upload it unmodified rather than fail the file.
 export function applyFallbackDate(buffer: Buffer, date: Date): Buffer {
   try {
     return writePngDate(buffer, date);
