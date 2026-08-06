@@ -13,6 +13,7 @@ const stream_1 = require("stream");
 const drive_1 = require("./drive");
 const gemini_1 = require("./gemini");
 const photos_1 = require("./photos");
+const pngDate_1 = require("./pngDate");
 const db_1 = require("./db");
 const SYNC_TIMEOUT_SECS = 3 * 60 * 60; // 3 hours — mirrors routes.ts's stale-run check
 // The Drive-side driveAuth client is built once per run from a token that
@@ -238,6 +239,20 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
                         break;
                     }
                     throw downloadErr;
+                }
+                // Best-effort PNG date fix (see pngDate.ts) — scoped to PNG only.
+                // Never allowed to fail the upload: resolvePngDate/applyFallbackDate
+                // never throw, and a failed createdTime fetch just skips the fix.
+                if (file.mime_type === "image/png") {
+                    const resolution = (0, pngDate_1.resolvePngDate)(fileBuffer);
+                    if (resolution.action === "fixed") {
+                        fileBuffer = resolution.buffer;
+                    }
+                    else if (resolution.action === "needs-fallback") {
+                        const createdTime = await (0, retry_1.withRetry)(() => (0, drive_1.getFileCreatedTime)(driveAuth, file.id)).catch(() => null);
+                        if (createdTime)
+                            fileBuffer = (0, pngDate_1.applyFallbackDate)(fileBuffer, createdTime);
+                    }
                 }
                 const description = useAI
                     ? await (0, retry_1.withRetry)(() => (0, gemini_1.generatePhotoDescription)(fileBuffer, file.mime_type)).catch(() => undefined)

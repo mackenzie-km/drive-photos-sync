@@ -2,9 +2,10 @@ import type { Response } from "express";
 import { withRetry } from "./retry";
 import { getAuthClient, createClientFromToken } from "./auth";
 import { Readable } from "stream";
-import { listDrivePhotos, downloadDriveFile } from "./drive";
+import { listDrivePhotos, downloadDriveFile, getFileCreatedTime } from "./drive";
 import { generatePhotoDescription } from "./gemini";
 import { uploadPhoto } from "./photos";
+import { resolvePngDate, applyFallbackDate } from "./pngDate";
 import {
   upsertDriveFile,
   getUninitializedFiles,
@@ -328,6 +329,22 @@ async function runSync(
           }
           throw downloadErr;
         }
+
+        // Best-effort PNG date fix (see pngDate.ts) — scoped to PNG only.
+        // Never allowed to fail the upload: resolvePngDate/applyFallbackDate
+        // never throw, and a failed createdTime fetch just skips the fix.
+        if (file.mime_type === "image/png") {
+          const resolution = resolvePngDate(fileBuffer);
+          if (resolution.action === "fixed") {
+            fileBuffer = resolution.buffer;
+          } else if (resolution.action === "needs-fallback") {
+            const createdTime = await withRetry(() =>
+              getFileCreatedTime(driveAuth, file.id),
+            ).catch(() => null);
+            if (createdTime) fileBuffer = applyFallbackDate(fileBuffer, createdTime);
+          }
+        }
+
         const description = useAI
           ? await withRetry(() =>
               generatePhotoDescription(fileBuffer, file.mime_type),
