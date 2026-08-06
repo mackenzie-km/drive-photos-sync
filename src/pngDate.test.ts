@@ -41,6 +41,25 @@ function xmpWithDateCreated(dateCreated: string): string {
   return `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/"><photoshop:DateCreated>${dateCreated}</photoshop:DateCreated></rdf:Description></rdf:RDF></x:xmpmeta>`;
 }
 
+// A chunk with a declared length far exceeding what actually follows it —
+// simulating bit-level corruption of a length field, as opposed to a
+// completely non-PNG buffer (already covered by the "not a png at all"
+// tests below). Buffer.subarray clamps out-of-range reads instead of
+// throwing, so a naive parser can silently swallow the real IEND chunk into
+// this one's data and never notice.
+function buildPngWithCorruptedChunkLength(): Buffer {
+  const ihdr = serializeChunk("IHDR", Buffer.alloc(13));
+  const badLength = Buffer.alloc(4);
+  badLength.writeUInt32BE(500_000, 0); // claims 500KB; nowhere near that much data follows
+  const typeBuf = Buffer.from("iTXt", "ascii");
+  const itxtData = Buffer.from("XML:com.adobe.xmp\0\0\0\0\0<xmp>whatever</xmp>", "utf8");
+  const crcVal = Buffer.alloc(4);
+  crcVal.writeUInt32BE(crc32(Buffer.concat([typeBuf, itxtData])) >>> 0, 0);
+  const corruptChunk = Buffer.concat([badLength, typeBuf, itxtData, crcVal]);
+  const iend = serializeChunk("IEND", Buffer.alloc(0));
+  return Buffer.concat([PNG_SIGNATURE, ihdr, corruptChunk, iend]);
+}
+
 function readExifDateTimeOriginal(png: Buffer): string | undefined {
   let pos = 8;
   let exifData: Buffer | undefined;
@@ -152,6 +171,11 @@ describe("resolvePngDate", () => {
     const garbage = Buffer.from("not a png at all");
     expect(resolvePngDate(garbage)).toEqual({ action: "needs-fallback" });
   });
+
+  it("treats a corrupted chunk length (that would silently swallow IEND) as needs-fallback, not a parseable file", () => {
+    const corrupted = buildPngWithCorruptedChunkLength();
+    expect(resolvePngDate(corrupted)).toEqual({ action: "needs-fallback" });
+  });
 });
 
 describe("applyFallbackDate", () => {
@@ -163,5 +187,10 @@ describe("applyFallbackDate", () => {
   it("returns the buffer unmodified rather than throwing on a malformed buffer", () => {
     const garbage = Buffer.from("not a png at all");
     expect(applyFallbackDate(garbage, new Date())).toBe(garbage);
+  });
+
+  it("returns the buffer unmodified rather than reconstructing a corrupted PNG missing IEND", () => {
+    const corrupted = buildPngWithCorruptedChunkLength();
+    expect(applyFallbackDate(corrupted, new Date())).toBe(corrupted);
   });
 });

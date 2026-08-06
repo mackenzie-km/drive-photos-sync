@@ -19,6 +19,16 @@ function parseChunks(png) {
         if (type === "IEND")
             break;
     }
+    // A corrupted/garbage length field on some earlier chunk can make
+    // Buffer.subarray silently over- or under-read (it clamps rather than
+    // throwing), which can swallow the real IEND chunk into a preceding
+    // chunk's data without ever raising an exception — the loop just runs out
+    // of buffer. That would let a mis-parsed structure through and produce a
+    // reconstructed PNG missing its terminator. Guard against that explicitly:
+    // a well-formed chunk stream must end with a chunk genuinely typed IEND.
+    if (chunks.length === 0 || chunks[chunks.length - 1].type !== "IEND") {
+        throw new Error("PNG chunk stream did not terminate in a valid IEND chunk");
+    }
     return chunks;
 }
 function serializeChunk(type, data) {
