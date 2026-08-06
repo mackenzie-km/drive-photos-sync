@@ -14,7 +14,7 @@ import { createClientFromToken } from "../src/auth";
 // Usage:
 //   DRIVE_ACCESS_TOKEN=ya29.... npx tsx prototype/driveMetadataTest.ts
 
-const FILE_ID = "1WHrupjO_3yZbRA9kPE2wnxjFObIWRgD3"; // IMG_2324.png, status=uploaded in drive_files
+const FILE_ID = process.argv[2] ?? "1WHrupjO_3yZbRA9kPE2wnxjFObIWRgD3"; // IMG_2324.png, status=uploaded in drive_files
 
 async function main() {
   const token = process.env.DRIVE_ACCESS_TOKEN;
@@ -27,7 +27,7 @@ async function main() {
 
   const res = await drive.files.get({
     fileId: FILE_ID,
-    fields: "id, name, createdTime, modifiedTime",
+    fields: "id, name, createdTime, modifiedTime, imageMediaMetadata(time)",
   });
 
   console.log("Drive metadata for", FILE_ID);
