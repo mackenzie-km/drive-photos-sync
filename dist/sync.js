@@ -13,6 +13,7 @@ const stream_1 = require("stream");
 const drive_1 = require("./drive");
 const gemini_1 = require("./gemini");
 const photos_1 = require("./photos");
+const pngDate_1 = require("./pngDate");
 const db_1 = require("./db");
 const SYNC_TIMEOUT_SECS = 3 * 60 * 60; // 3 hours — mirrors routes.ts's stale-run check
 // The Drive-side driveAuth client is built once per run from a token that
@@ -238,6 +239,30 @@ async function runSync(userId, runId, useAI, folderId, driveAccessToken) {
                         break;
                     }
                     throw downloadErr;
+                }
+                // Best-effort PNG date fix (see pngDate.ts) — scoped to PNG only.
+                // resolvePngDate/applyFallbackDate never throw. The createdTime
+                // fallback fetch below is independent of the download above (the
+                // file already has its bytes) — any failure there, including an
+                // expired token, just skips the fix and uploads undated rather than
+                // halting the run; a genuinely expired token still gets caught
+                // normally at the next file's download.
+                if (file.mime_type === "image/png") {
+                    const resolution = (0, pngDate_1.resolvePngDate)(fileBuffer);
+                    if (resolution.action === "fixed") {
+                        fileBuffer = resolution.buffer;
+                        console.log(`[sync:${userId}]   date fix: ${file.name} recovered via XMP`);
+                    }
+                    else if (resolution.action === "needs-fallback") {
+                        const createdTime = await (0, retry_1.withRetry)(() => (0, drive_1.getFileCreatedTime)(driveAuth, file.id)).catch((err) => {
+                            console.log(`[sync:${userId}]   date fix: ${file.name} createdTime fetch failed (${err.message}) — uploading undated`);
+                            return null;
+                        });
+                        if (createdTime) {
+                            fileBuffer = (0, pngDate_1.applyFallbackDate)(fileBuffer, createdTime);
+                            console.log(`[sync:${userId}]   date fix: ${file.name} used Drive createdTime fallback`);
+                        }
+                    }
                 }
                 const description = useAI
                     ? await (0, retry_1.withRetry)(() => (0, gemini_1.generatePhotoDescription)(fileBuffer, file.mime_type)).catch(() => undefined)

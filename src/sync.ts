@@ -2,9 +2,10 @@ import type { Response } from "express";
 import { withRetry } from "./retry";
 import { getAuthClient, createClientFromToken } from "./auth";
 import { Readable } from "stream";
-import { listDrivePhotos, downloadDriveFile } from "./drive";
+import { listDrivePhotos, downloadDriveFile, getFileCreatedTime } from "./drive";
 import { generatePhotoDescription } from "./gemini";
 import { uploadPhoto } from "./photos";
+import { resolvePngDate, applyFallbackDate } from "./pngDate";
 import {
   upsertDriveFile,
   getUninitializedFiles,
@@ -328,6 +329,35 @@ async function runSync(
           }
           throw downloadErr;
         }
+
+        // Best-effort PNG date fix (see pngDate.ts) — scoped to PNG only.
+        // resolvePngDate/applyFallbackDate never throw. The createdTime
+        // fallback fetch below is independent of the download above (the
+        // file already has its bytes) — any failure there, including an
+        // expired token, just skips the fix and uploads undated rather than
+        // halting the run; a genuinely expired token still gets caught
+        // normally at the next file's download.
+        if (file.mime_type === "image/png") {
+          const resolution = resolvePngDate(fileBuffer);
+          if (resolution.action === "fixed") {
+            fileBuffer = resolution.buffer;
+            console.log(`[sync:${userId}]   date fix: ${file.name} recovered via XMP`);
+          } else if (resolution.action === "needs-fallback") {
+            const createdTime = await withRetry(() =>
+              getFileCreatedTime(driveAuth, file.id),
+            ).catch((err: any) => {
+              console.log(
+                `[sync:${userId}]   date fix: ${file.name} createdTime fetch failed (${err.message}) — uploading undated`,
+              );
+              return null;
+            });
+            if (createdTime) {
+              fileBuffer = applyFallbackDate(fileBuffer, createdTime);
+              console.log(`[sync:${userId}]   date fix: ${file.name} used Drive createdTime fallback`);
+            }
+          }
+        }
+
         const description = useAI
           ? await withRetry(() =>
               generatePhotoDescription(fileBuffer, file.mime_type),

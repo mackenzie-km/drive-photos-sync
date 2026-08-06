@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.listDrivePhotos = listDrivePhotos;
 exports.downloadDriveFile = downloadDriveFile;
+exports.getFileCreatedTime = getFileCreatedTime;
 const googleapis_1 = require("googleapis");
 // All image types Drive can store
 const MIME_QUERY = [
@@ -48,4 +49,11 @@ async function downloadDriveFile(auth, fileId) {
     const drive = googleapis_1.google.drive({ version: "v3", auth });
     const res = await drive.files.get({ fileId, alt: "media" }, { responseType: "arraybuffer" });
     return Buffer.from(res.data);
+}
+// Last-resort date source for the PNG date-fix (see pngDate.ts) — only
+// called for the small slice of files with no usable EXIF or XMP date.
+async function getFileCreatedTime(auth, fileId) {
+    const drive = googleapis_1.google.drive({ version: "v3", auth });
+    const res = await drive.files.get({ fileId, fields: "createdTime" });
+    return res.data.createdTime ? new Date(res.data.createdTime) : null;
 }

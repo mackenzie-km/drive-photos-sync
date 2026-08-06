@@ -1,14 +1,15 @@
 const mockFilesList = jest.fn();
+const mockFilesGet = jest.fn();
 
 jest.mock("googleapis", () => ({
   google: {
     drive: jest.fn().mockReturnValue({
-      files: { list: mockFilesList },
+      files: { list: mockFilesList, get: mockFilesGet },
     }),
   },
 }));
 
-import { listDrivePhotos } from "./drive";
+import { listDrivePhotos, getFileCreatedTime } from "./drive";
 import { OAuth2Client } from "google-auth-library";
 
 const mockAuth = {} as OAuth2Client;
@@ -65,5 +66,28 @@ describe("listDrivePhotos", () => {
     expect(files[0].id).toBe("file-1");
     expect(files[1].id).toBe("file-2");
     expect(mockFilesList).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("getFileCreatedTime", () => {
+  beforeEach(() => {
+    mockFilesGet.mockClear();
+  });
+
+  it("returns the parsed createdTime", async () => {
+    mockFilesGet.mockResolvedValueOnce({ data: { createdTime: "2018-06-02T07:55:37.034Z" } });
+
+    const result = await getFileCreatedTime(mockAuth, "file-1");
+
+    expect(result).toEqual(new Date("2018-06-02T07:55:37.034Z"));
+    expect(mockFilesGet).toHaveBeenCalledWith({ fileId: "file-1", fields: "createdTime" });
+  });
+
+  it("returns null when createdTime is missing", async () => {
+    mockFilesGet.mockResolvedValueOnce({ data: {} });
+
+    const result = await getFileCreatedTime(mockAuth, "file-1");
+
+    expect(result).toBeNull();
   });
 });

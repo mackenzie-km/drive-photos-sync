@@ -70,3 +70,14 @@ export async function downloadDriveFile(
   );
   return Buffer.from(res.data as ArrayBuffer);
 }
+
+// Last-resort date source for the PNG date-fix (see pngDate.ts) — only
+// called for the small slice of files with no usable EXIF or XMP date.
+export async function getFileCreatedTime(
+  auth: OAuth2Client,
+  fileId: string,
+): Promise<Date | null> {
+  const drive = google.drive({ version: "v3", auth });
+  const res = await drive.files.get({ fileId, fields: "createdTime" });
+  return res.data.createdTime ? new Date(res.data.createdTime) : null;
+}

@@ -7,6 +7,7 @@ jest.mock("./drive", () => ({
   downloadDriveFile: jest
     .fn()
     .mockResolvedValue(Buffer.from("fake-image-data")),
+  getFileCreatedTime: jest.fn(),
 }));
 
 jest.mock("./gemini", () => ({
@@ -52,7 +53,7 @@ import {
   getFileCounts,
   getResumableCount,
 } from "./db";
-import { listDrivePhotos, downloadDriveFile } from "./drive";
+import { listDrivePhotos, downloadDriveFile, getFileCreatedTime } from "./drive";
 import { uploadPhoto } from "./photos";
 
 const mockGeneratePhotoDescription = generatePhotoDescription as jest.Mock;
@@ -65,6 +66,7 @@ const mockCreateSyncRun = createSyncRun as jest.Mock;
 const mockUpsertDriveFile = upsertDriveFile as jest.Mock;
 const mockClearFailedFiles = clearFailedFiles as jest.Mock;
 const mockDownloadDriveFile = downloadDriveFile as jest.Mock;
+const mockGetFileCreatedTime = getFileCreatedTime as jest.Mock;
 const mockUploadPhoto = uploadPhoto as jest.Mock;
 const mockGetFileCounts = getFileCounts as jest.Mock;
 
@@ -382,6 +384,204 @@ describe("startSync — Gemini integration", () => {
     await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
 
     expect(mockGeneratePhotoDescription).not.toHaveBeenCalled();
+  });
+});
+
+describe("startSync — PNG date fix", () => {
+  // Minimal local PNG fixture builders — independent of pngDate.ts's own
+  // internals, same approach as pngDate.test.ts.
+  const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+  function serializeChunk(type: string, data: Buffer): Buffer {
+    const { crc32 } = require("zlib");
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length, 0);
+    const typeBuf = Buffer.from(type, "ascii");
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])) >>> 0, 0);
+    return Buffer.concat([length, typeBuf, data, crc]);
+  }
+
+  function buildPng(chunks: { type: string; data: Buffer }[]): Buffer {
+    const all = [
+      { type: "IHDR", data: Buffer.alloc(13) },
+      ...chunks,
+      { type: "IEND", data: Buffer.alloc(0) },
+    ];
+    return Buffer.concat([PNG_SIGNATURE, ...all.map((c) => serializeChunk(c.type, c.data))]);
+  }
+
+  function buildITXtChunk(keyword: string, text: string): Buffer {
+    return Buffer.concat([
+      Buffer.from(keyword, "ascii"),
+      Buffer.from([0, 0, 0]),
+      Buffer.from([0]),
+      Buffer.from([0]),
+      Buffer.from(text, "utf8"),
+    ]);
+  }
+
+  function xmpWithDateCreated(dateCreated: string): string {
+    return `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/"><photoshop:DateCreated>${dateCreated}</photoshop:DateCreated></rdf:Description></rdf:RDF></x:xmpmeta>`;
+  }
+
+  function readExifDateTimeOriginal(png: Buffer): string | undefined {
+    let pos = 8;
+    let exifData: Buffer | undefined;
+    while (pos < png.length) {
+      const length = png.readUInt32BE(pos);
+      const type = png.subarray(pos + 4, pos + 8).toString("ascii");
+      if (type === "eXIf") exifData = png.subarray(pos + 8, pos + 8 + length);
+      pos += 8 + length + 4;
+      if (type === "IEND") break;
+    }
+    if (!exifData) return undefined;
+    const ifd0Offset = exifData.readUInt32BE(4);
+    const numEntries = exifData.readUInt16BE(ifd0Offset);
+    let exifIfdOffset: number | undefined;
+    for (let i = 0; i < numEntries; i++) {
+      const entryOffset = ifd0Offset + 2 + i * 12;
+      if (exifData.readUInt16BE(entryOffset) === 0x8769) {
+        exifIfdOffset = exifData.readUInt32BE(entryOffset + 8);
+      }
+    }
+    if (exifIfdOffset === undefined) return undefined;
+    const subEntries = exifData.readUInt16BE(exifIfdOffset);
+    for (let i = 0; i < subEntries; i++) {
+      const entryOffset = exifIfdOffset + 2 + i * 12;
+      if (exifData.readUInt16BE(entryOffset) === 0x9003) {
+        const count = exifData.readUInt32BE(entryOffset + 4);
+        const offset = exifData.readUInt32BE(entryOffset + 8);
+        return exifData
+          .subarray(offset, offset + count)
+          .toString("ascii")
+          .replace(/\0+$/, "");
+      }
+    }
+    return undefined;
+  }
+
+  async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk as Buffer);
+    return Buffer.concat(chunks);
+  }
+
+  const PNG_FILE = { ...FILE, name: "photo.png", mime_type: "image/png" };
+  const basePng = buildPng([]);
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockListDrivePhotos.mockImplementation(async function* () {});
+  });
+
+  it("applies the XMP-recovered date and does not fall back to Drive when recovery succeeds", async () => {
+    // monthField=-1, dayField=02 -> realMonth = 12
+    const xmp = xmpWithDateCreated("2019--1-02T14:30:00-08:00");
+    const png = buildPng([{ type: "iTXt", data: buildITXtChunk("XML:com.adobe.xmp", xmp) }]);
+
+    mockGetUninitializedFiles.mockResolvedValueOnce([PNG_FILE]).mockResolvedValue([]);
+    mockDownloadDriveFile.mockResolvedValueOnce(png);
+
+    await startSync("user-png-xmp", false, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockGetFileCreatedTime).not.toHaveBeenCalled();
+    const uploadedBuffer = await streamToBuffer(mockUploadPhoto.mock.calls[0][1]);
+    // Local wall-clock time is preserved verbatim; the -08:00 offset is
+    // intentionally discarded rather than applied as a UTC conversion.
+    expect(readExifDateTimeOriginal(uploadedBuffer)).toBe("2019:12:01 14:30:00");
+  });
+
+  it("falls back to Drive createdTime when neither EXIF nor XMP recovery works", async () => {
+    mockGetUninitializedFiles.mockResolvedValueOnce([PNG_FILE]).mockResolvedValue([]);
+    mockDownloadDriveFile.mockResolvedValueOnce(basePng);
+    mockGetFileCreatedTime.mockResolvedValueOnce(new Date("2024-06-02T07:55:37.034Z"));
+
+    await startSync("user-png-fallback", false, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockGetFileCreatedTime).toHaveBeenCalledWith(expect.anything(), PNG_FILE.id);
+    const uploadedBuffer = await streamToBuffer(mockUploadPhoto.mock.calls[0][1]);
+    expect(readExifDateTimeOriginal(uploadedBuffer)).toBe("2024:06:02 07:55:37");
+  });
+
+  it("leaves the buffer untouched when a valid EXIF date is already present", async () => {
+    const { applyFallbackDate } = require("./pngDate");
+    const withExif = applyFallbackDate(basePng, new Date("2020-05-15T10:00:00Z"));
+
+    mockGetUninitializedFiles.mockResolvedValueOnce([PNG_FILE]).mockResolvedValue([]);
+    mockDownloadDriveFile.mockResolvedValueOnce(withExif);
+
+    await startSync("user-png-existing-exif", false, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockGetFileCreatedTime).not.toHaveBeenCalled();
+    const uploadedBuffer = await streamToBuffer(mockUploadPhoto.mock.calls[0][1]);
+    expect(uploadedBuffer).toEqual(withExif);
+  });
+
+  it("does not touch the buffer or call getFileCreatedTime for non-PNG files", async () => {
+    mockGetUninitializedFiles.mockResolvedValueOnce([FILE]).mockResolvedValue([]);
+
+    await startSync("user-jpeg-unaffected", false, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockGetFileCreatedTime).not.toHaveBeenCalled();
+    const uploadedBuffer = await streamToBuffer(mockUploadPhoto.mock.calls[0][1]);
+    expect(uploadedBuffer).toEqual(Buffer.from("fake-image-data"));
+  });
+
+  it("uploads unmodified when the createdTime fallback fetch fails with a non-auth error", async () => {
+    mockGetUninitializedFiles.mockResolvedValueOnce([PNG_FILE]).mockResolvedValue([]);
+    mockDownloadDriveFile.mockResolvedValueOnce(basePng);
+    mockGetFileCreatedTime.mockRejectedValue(new Error("Drive API unavailable"));
+
+    await startSync("user-png-fallback-fails", false, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockUpdateFileStatus).toHaveBeenCalledWith(
+      "uploaded",
+      "media-id-123",
+      null,
+      0,
+      PNG_FILE.id,
+      "user-png-fallback-fails",
+    );
+    const uploadedBuffer = await streamToBuffer(mockUploadPhoto.mock.calls[0][1]);
+    expect(uploadedBuffer).toEqual(basePng);
+  });
+
+  it("still uploads undated (does not halt the run) when the createdTime fallback hits a Drive auth error", async () => {
+    // Unlike a failed download, a failed date-fix fallback doesn't need to
+    // halt the run — the file already has its bytes and can upload without
+    // a date fix. A genuinely expired token still gets caught normally at
+    // the next file's real download.
+    mockGetUninitializedFiles.mockResolvedValueOnce([PNG_FILE]).mockResolvedValue([]);
+    mockDownloadDriveFile.mockResolvedValueOnce(basePng);
+
+    const authError = Object.assign(new Error("Invalid Credentials"), {
+      code: 401,
+      response: {
+        status: 401,
+        data: { error: { errors: [{ reason: "authError" }] } },
+      },
+    });
+    mockGetFileCreatedTime.mockRejectedValue(authError);
+
+    await startSync("user-png-fallback-auth-error", false, "folder-id");
+    await waitFor(() => mockUpdateSyncRun.mock.calls.length > 0);
+
+    expect(mockUpdateFileStatus).toHaveBeenCalledWith(
+      "uploaded",
+      "media-id-123",
+      null,
+      0,
+      PNG_FILE.id,
+      "user-png-fallback-auth-error",
+    );
+    const uploadedBuffer = await streamToBuffer(mockUploadPhoto.mock.calls[0][1]);
+    expect(uploadedBuffer).toEqual(basePng);
   });
 });
 
