@@ -6,6 +6,7 @@ this is not a changelog of every commit.
 
 ## progress-bar-colors
 - Progress bar now renders four segments (uploaded/pending/failed/duplicates) instead of a single fill, driven off fileCounts rather than the removed total/progress calc, and the token_expired status message moved into a separate subheading.
+- Deprioritized the "manually clear failed photos" backlog feature since observed failures (~500) all stem from permanently corrupted/0kb Drive source files, not transient errors that clearing would fix.
 
 ## feature/png-exif-date-fix
 - PNG date is resolved in priority order: existing EXIF date (used as-is) -> recovered from a corrupted XMP field via a known formula -> Drive's createdTime as a last resort.
