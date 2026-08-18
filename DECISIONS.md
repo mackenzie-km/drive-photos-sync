@@ -4,6 +4,9 @@ One line per real design/behavior decision, grouped by branch. Trivial
 changes (wording, formatting, docs-only edits) are intentionally skipped —
 this is not a changelog of every commit.
 
+## progress-bar-colors
+- Progress bar now renders four segments (uploaded/pending/failed/duplicates) instead of a single fill, driven off fileCounts rather than the removed total/progress calc, and the token_expired status message moved into a separate subheading.
+
 ## feature/png-exif-date-fix
 - PNG date is resolved in priority order: existing EXIF date (used as-is) -> recovered from a corrupted XMP field via a known formula -> Drive's createdTime as a last resort.
 - A dateless eXIf chunk only blocks rewriting if it carries Orientation or GPS — everything else (resolution, dimensions, colorspace, EXIF/FlashPix version markers, scene-capture-type, ...) is safe to discard. Deliberately a blocklist of the two tags actually worth protecting, not an allowlist of "safe" ones: real backlog files kept surfacing auto-generated tags an allowlist hadn't seen yet, falsely blocking fixable files — confirmed via production testing, where Google Photos permanently dedupes an unmodified re-upload to the existing (wrongly-dated) item, so a falsely-blocked file could never be fixed at all.

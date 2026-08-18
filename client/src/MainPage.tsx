@@ -41,7 +41,11 @@ const STATUS_LABEL: Record<string, string> = {
   failed: "❌ Failed",
   aborted: "🛑 Aborted",
   limit_reached: "⚠️ Upload limit reached",
-  token_expired: "🔑 Drive session expired — click Resume to continue",
+  token_expired: "🔑 Expired",
+};
+
+const STATUS_SUBHEADING: Partial<Record<string, string>> = {
+  token_expired: "Drive session expired — click Resume to continue",
 };
 
 const IS_RUNNING = (status: string) =>
@@ -233,9 +237,13 @@ export default function MainPage() {
   }
 
   const counts = syncStatus?.fileCounts ?? {};
-  const total = Object.values(counts).reduce((a, b) => a + Number(b), 0);
   const uploaded = Number(counts.uploaded ?? 0);
-  const progress = total > 0 ? Math.round((uploaded / total) * 100) : 0;
+  const pending =
+    Number(counts.uninitialized ?? 0) + Number(counts.in_progress ?? 0);
+  const failed = Number(counts.failed ?? 0);
+  const duplicates = Number(counts.skipped ?? 0);
+  const total = uploaded + pending + failed + duplicates;
+  const segmentPct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
   const status = syncStatus?.status ?? "idle";
   const currentFile = syncStatus?.currentFile ?? null;
   const canResume = Number(syncStatus?.resumableCount ?? 0) > 0;
@@ -275,6 +283,9 @@ export default function MainPage() {
               {STATUS_LABEL[status] ?? status}
               <span className="status-heading-bar" />
             </span>
+            {STATUS_SUBHEADING[status] && (
+              <p className="status-subheading">{STATUS_SUBHEADING[status]}</p>
+            )}
           </div>
           <div className="action-buttons">
             {IS_RUNNING(status) ? (
@@ -329,8 +340,20 @@ export default function MainPage() {
         </p>
         <div className="progress-bar-track">
           <div
-            className="progress-bar-fill"
-            style={{ width: `${progress}%` }}
+            className="progress-segment progress-segment-uploaded"
+            style={{ width: `${segmentPct(uploaded)}%` }}
+          />
+          <div
+            className="progress-segment progress-segment-pending"
+            style={{ width: `${segmentPct(pending)}%` }}
+          />
+          <div
+            className="progress-segment progress-segment-failed"
+            style={{ width: `${segmentPct(failed)}%` }}
+          />
+          <div
+            className="progress-segment progress-segment-duplicates"
+            style={{ width: `${segmentPct(duplicates)}%` }}
           />
         </div>
         <p className="progress-label">
