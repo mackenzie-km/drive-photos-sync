@@ -238,19 +238,42 @@ button:disabled:hover {
   margin: 0;
 }
 
+.status-subheading {
+  font-family: "Nunito", ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: oklch(43.9% 0 0);
+  margin: 0;
+}
+
 .progress-bar-track {
+  display: flex;
   height: 8px;
-  background: #f4d6b0;
+  background: #f0ebe6;
   border-radius: 999px;
   overflow: hidden;
   margin-bottom: 10px;
 }
 
-.progress-bar-fill {
+.progress-segment {
   height: 100%;
-  background: linear-gradient(to right, #c97d35, #d68c45);
-  border-radius: 999px;
   transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.progress-segment-uploaded {
+  background: linear-gradient(to right, #2a7a3b, #3f9a52);
+}
+
+.progress-segment-pending {
+  background: linear-gradient(to right, #c97d35, #d68c45);
+}
+
+.progress-segment-failed {
+  background: #c0392b;
+}
+
+.progress-segment-duplicates {
+  background: #b0b0b0;
 }
 
 .progress-label {
