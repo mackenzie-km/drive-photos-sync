@@ -3,3 +3,4 @@ client/dist/
 .env*
 sync.db
 .claude
+.DS_Store

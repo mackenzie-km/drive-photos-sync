@@ -17,6 +17,8 @@ exports.getResumableCount = getResumableCount;
 exports.createSyncRun = createSyncRun;
 exports.updateSyncRun = updateSyncRun;
 exports.getUploadedFiles = getUploadedFiles;
+exports.getUploadedFilesPendingDriveDelete = getUploadedFilesPendingDriveDelete;
+exports.markDriveFileDeleted = markDriveFileDeleted;
 exports.getLatestSyncRun = getLatestSyncRun;
 const pg_1 = require("pg");
 // A Pool manages multiple connections — rather than opening/closing a connection
@@ -91,6 +93,12 @@ const migrations = [
       ALTER TABLE sync_runs DROP COLUMN IF EXISTS skipped;
       ALTER TABLE sync_runs DROP COLUMN IF EXISTS failed;
       ALTER TABLE sync_runs DROP COLUMN IF EXISTS completed_at;
+    `,
+    },
+    {
+        name: "0002_add_drive_deleted_at",
+        sql: `
+      ALTER TABLE drive_files ADD COLUMN IF NOT EXISTS drive_deleted_at BIGINT;
     `,
     },
 ];
@@ -208,6 +216,21 @@ async function getUploadedFiles(userId) {
      WHERE user_id = $1 AND status = 'uploaded'
      ORDER BY synced_at DESC`, [userId]);
     return result.rows;
+}
+// Uploaded files that have a confirmed Photos media ID and haven't already
+// been trashed from Drive. drive_deleted_at (not status) tracks this so the
+// md5-dedup check, which keys off status = 'uploaded', is unaffected.
+async function getUploadedFilesPendingDriveDelete(userId, limit) {
+    const result = await (0, exports.query)(`SELECT id, name, photos_media_id FROM drive_files
+     WHERE user_id = $1 AND status = 'uploaded' AND drive_deleted_at IS NULL
+       AND photos_media_id IS NOT NULL
+     ORDER BY synced_at ASC
+     LIMIT $2`, [userId, limit]);
+    return result.rows;
+}
+async function markDriveFileDeleted(userId, id) {
+    await (0, exports.query)(`UPDATE drive_files SET drive_deleted_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+     WHERE id = $1 AND user_id = $2`, [id, userId]);
 }
 async function getLatestSyncRun(userId) {
     const result = await (0, exports.query)(`SELECT * FROM sync_runs WHERE user_id = $1 ORDER BY id DESC LIMIT 1`, [userId]);
