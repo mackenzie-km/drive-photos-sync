@@ -113,7 +113,10 @@ reconstructed from actual usage, not instrumented at build time:
 - Reliable support for many simultaneous users across multiple servers
   (SQS, Redis Pub/Sub).
 - A way to manually clear failed (not just pending) photos from the
-  backlog.
+  backlog. Deprioritized as of 2026-08-17 — the ~500 failures observed so
+  far (see §7) all trace back to source files in Drive that are
+  permanently corrupted/0kb, not transient errors, so clearing them
+  wouldn't make them uploadable. Revisit if failure causes change.
 
 ---
 
