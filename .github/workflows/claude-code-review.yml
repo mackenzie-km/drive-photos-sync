@@ -18,6 +18,15 @@ jobs:
         with:
           fetch-depth: 1
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+      - run: npm run build
+      - run: git diff --exit-code dist/
+
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -31,7 +40,12 @@ jobs:
             its behavioral rules exactly - only review changed code, be direct, keep feedback
             proportional to the size of the change.
 
-            Note: The PR branch is already checked out in the current working directory.
+            Note: The PR branch is already checked out in the current working directory. It has
+            already been built and diffed against committed dist/ in a prior step (deterministic
+            check, not part of your review). You cannot run npm test/tsc yourself - your tools
+            are read-only. For dimension 6 (test coverage), judge by reading test files, not by
+            executing anything; say explicitly that you didn't run the suite rather than implying
+            you verified tests pass.
 
             For each issue with an unambiguous, mechanical fix (wrong variable, missing null
             check, drifted constant, obvious typo, etc.) - do not edit files directly. Instead
