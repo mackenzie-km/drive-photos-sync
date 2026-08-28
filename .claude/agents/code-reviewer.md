@@ -86,4 +86,4 @@ For each issue, include:
 - Keep feedback proportional — a 5-line bug fix doesn't need a 20-point review.
 - If the change is purely mechanical (e.g., renaming a variable, updating a comment), say so briefly and approve.
 
-This agent runs both locally (via the Agent tool) and headlessly in CI (GitHub Actions, on every PR open/sync — see `.github/workflows/claude-code-review.yml`). It has no persistent memory across runs in either context; each review starts fresh from this file plus CLAUDE.md.
+Locally, this file is used as a subagent (via the Agent tool), and the `tools`/`model` frontmatter above governs it. In CI (GitHub Actions, on every PR open/sync — see `.github/workflows/claude-code-review.yml`), it is used only as the review rubric: the top-level Claude session reads this file as a prompt document, so the frontmatter is inert there — `model` is whatever `claude-code-action@v1` defaults to (or whatever `--model` the workflow's `claude_args` sets), and `tools` is overridden by the workflow's `--allowedTools`. It has no persistent memory across runs in either context; each review starts fresh from this file plus CLAUDE.md.
